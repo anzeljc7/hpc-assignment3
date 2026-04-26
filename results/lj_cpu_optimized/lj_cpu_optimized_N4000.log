@@ -1,0 +1,63 @@
+rm -f lennard-jones.o gifenc.o main.o lj.out
+nvcc -Wno-deprecated-gpu-targets -gencode=arch=compute_70,code=sm_70 -O3 -Xcompiler --openmp,-Wall -c -o lennard-jones.o src/lennard-jones.cu
+nvcc -Wno-deprecated-gpu-targets -gencode=arch=compute_70,code=sm_70 -O3 -Xcompiler --openmp,-Wall -c -o gifenc.o src/gifenc.c
+nvcc -Wno-deprecated-gpu-targets -gencode=arch=compute_70,code=sm_70 -O3 -Xcompiler --openmp,-Wall -c -o main.o src/main.c
+nvcc -Wno-deprecated-gpu-targets -gencode=arch=compute_70,code=sm_70 -O3 -Xcompiler --openmp,-Wall lennard-jones.o gifenc.o main.o -o lj.out -lm
+==========================================
+Začenjam meritve z 64 nitmi...
+Testiram mrežo: 4000 delcev, 5000 korakov
+==========================================
+--- Zagon 1/5 ---
+
+Finished simulation.
+Final KE:  5078.2207 | delta: +3078.2207
+Final PE: -6618.8687 | delta: -3078.4624
+Final E:  -1540.6480 | delta: -0.2416
+Simulation time 5000 steps: 1.146 seconds
+
+--> Izmerjen čas za zagon 1:     1.146 s
+
+--- Zagon 2/5 ---
+
+Finished simulation.
+Final KE:  5078.2207 | delta: +3078.2207
+Final PE: -6618.8687 | delta: -3078.4624
+Final E:  -1540.6480 | delta: -0.2416
+Simulation time 5000 steps: 1.112 seconds
+
+--> Izmerjen čas za zagon 2:     1.112 s
+
+--- Zagon 3/5 ---
+
+Finished simulation.
+Final KE:  5078.2207 | delta: +3078.2207
+Final PE: -6618.8687 | delta: -3078.4624
+Final E:  -1540.6480 | delta: -0.2416
+Simulation time 5000 steps: 1.105 seconds
+
+--> Izmerjen čas za zagon 3:     1.105 s
+
+--- Zagon 4/5 ---
+
+Finished simulation.
+Final KE:  5078.2207 | delta: +3078.2207
+Final PE: -6618.8687 | delta: -3078.4624
+Final E:  -1540.6480 | delta: -0.2416
+Simulation time 5000 steps: 1.109 seconds
+
+--> Izmerjen čas za zagon 4:     1.109 s
+
+--- Zagon 5/5 ---
+
+Finished simulation.
+Final KE:  5078.2207 | delta: +3078.2207
+Final PE: -6618.8687 | delta: -3078.4624
+Final E:  -1540.6480 | delta: -0.2416
+Simulation time 5000 steps: 1.106 seconds
+
+--> Izmerjen čas za zagon 5:     1.106 s
+
+==========================================
+  POVPREČJE ZA N=4000 =  1.115600 s
+==========================================
+Log datoteka je shranjena v: results/lj_cpu_optimized/lj_cpu_optimized_N4000.log

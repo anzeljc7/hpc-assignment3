@@ -2,7 +2,8 @@
 #define LJ_H
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 #define DT 0.002
@@ -19,50 +20,47 @@ extern "C" {
 #define FRAME_DELAY 3
 #define GIF_FILE "simulation.gif"
 
+    typedef struct
+    {
+        double x;
+        double y;
+        double vx;
+        double vy;
+        double fx;
+        double fy;
+    } Particle;
 
+    typedef struct
+    {
+        unsigned int n;
+        const Particle *particles;
+        double start_kinetic;
+        double start_potential;
+        double start_total;
+        double final_kinetic;
+        double final_potential;
+        double final_total;
+    } SimulationResult;
 
-typedef struct {
-    double x;
-    double y;
-    double vx;
-    double vy;
-    double fx;
-    double fy;
-} Particle;
+    int initialize_particles(
+        Particle *particles,
+        unsigned int n,
+        double box_size,
+        double placement_fraction,
+        unsigned int seed,
+        double temperature);
+    void wrap_positions(Particle *particles, unsigned int n, double box_size);
 
-typedef struct {
-    unsigned int n;
-    const Particle *particles;
-    double start_kinetic;
-    double start_potential;
-    double start_total;
-    double final_kinetic;
-    double final_potential;
-    double final_total;
-} SimulationResult;
-
-int initialize_particles(
-    Particle *particles,
-    unsigned int n,
-    double box_size,
-    double placement_fraction,
-    unsigned int seed,
-    double temperature
-);
-void wrap_positions(Particle *particles, unsigned int n, double box_size);
-
-double compute_v_shift(void);
-double compute_forces(
-    Particle *particles,
-    unsigned int n,
-    double box_size
-);
-double leapfrog_step(
-    Particle *particles,
-    unsigned int n,
-    double box_size
-);
-SimulationResult run_simulation(Particle *particles, unsigned int n, unsigned int nsteps, double box_size, int log_steps);
+    double compute_v_shift(void);
+    double compute_forces(
+        Particle *particles,
+        unsigned int n,
+        double box_size);
+    double leapfrog_step(
+        Particle *particles,
+        unsigned int n,
+        double box_size);
+    SimulationResult run_simulation(Particle *particles, unsigned int n, unsigned int nsteps, double box_size, int log_steps);
 
 #ifdef __cplusplus
 }
