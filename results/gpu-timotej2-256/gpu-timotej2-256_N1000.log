@@ -10,54 +10,54 @@ Testiram mrežo: 1000 delcev, 5000 korakov
 --- Zagon 1/5 ---
 
 Finished simulation.
-Final KE:   741.1618 | delta: +241.1618
-Final PE: -1615.8503 | delta: -241.1565
-Final E:   -874.6885 | delta: +0.0053
-Simulation time 5000 steps: 14.380 seconds
+Final KE:   741.8517 | delta: +241.8517
+Final PE: -1616.5415 | delta: -241.8477
+Final E:   -874.6898 | delta: +0.0040
+Simulation time 5000 steps: 0.298 seconds
 
---> Izmerjen čas za zagon 1:    14.380 s
+--> Izmerjen čas za zagon 1:     0.298 s
 
 --- Zagon 2/5 ---
 
 Finished simulation.
-Final KE:   741.6841 | delta: +241.6841
-Final PE: -1616.3721 | delta: -241.6783
-Final E:   -874.6881 | delta: +0.0057
-Simulation time 5000 steps: 14.468 seconds
+Final KE:   741.7410 | delta: +241.7410
+Final PE: -1616.4323 | delta: -241.7385
+Final E:   -874.6913 | delta: +0.0025
+Simulation time 5000 steps: 0.251 seconds
 
---> Izmerjen čas za zagon 2:    14.468 s
+--> Izmerjen čas za zagon 2:     0.251 s
 
 --- Zagon 3/5 ---
 
 Finished simulation.
-Final KE:   741.0123 | delta: +241.0123
-Final PE: -1615.7032 | delta: -241.0095
-Final E:   -874.6909 | delta: +0.0028
-Simulation time 5000 steps: 14.181 seconds
+Final KE:   741.8907 | delta: +241.8907
+Final PE: -1616.5806 | delta: -241.8868
+Final E:   -874.6899 | delta: +0.0039
+Simulation time 5000 steps: 0.242 seconds
 
---> Izmerjen čas za zagon 3:    14.181 s
+--> Izmerjen čas za zagon 3:     0.242 s
 
 --- Zagon 4/5 ---
 
 Finished simulation.
-Final KE:   742.1016 | delta: +242.1016
-Final PE: -1616.7926 | delta: -242.0988
-Final E:   -874.6910 | delta: +0.0028
-Simulation time 5000 steps: 13.795 seconds
+Final KE:   742.1739 | delta: +242.1739
+Final PE: -1616.8627 | delta: -242.1689
+Final E:   -874.6888 | delta: +0.0050
+Simulation time 5000 steps: 0.241 seconds
 
---> Izmerjen čas za zagon 4:    13.795 s
+--> Izmerjen čas za zagon 4:     0.241 s
 
 --- Zagon 5/5 ---
 
 Finished simulation.
-Final KE:   741.4428 | delta: +241.4428
-Final PE: -1616.1322 | delta: -241.4384
-Final E:   -874.6894 | delta: +0.0044
-Simulation time 5000 steps: 13.032 seconds
+Final KE:   741.7212 | delta: +241.7212
+Final PE: -1616.4101 | delta: -241.7163
+Final E:   -874.6889 | delta: +0.0049
+Simulation time 5000 steps: 0.240 seconds
 
---> Izmerjen čas za zagon 5:    13.032 s
+--> Izmerjen čas za zagon 5:     0.240 s
 
 ==========================================
-  POVPREČJE ZA N=1000 = 13.971200 s
+  POVPREČJE ZA N=1000 =  0.254400 s
 ==========================================
 Log datoteka je shranjena v: results/gpu-timotej2-256/gpu-timotej2-256_N1000.log
