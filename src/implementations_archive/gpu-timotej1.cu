@@ -10,11 +10,11 @@
 #include "lennard-jones.h"
 
 #ifndef FORCE_THREADS
-#define FORCE_THREADS 256
+#define FORCE_THREADS 128
 #endif
 
 #ifndef REDUCE_THREADS
-#define REDUCE_THREADS 256
+#define REDUCE_THREADS 128
 #endif
 
 #define CUDA_CHECK(call)                                                         \

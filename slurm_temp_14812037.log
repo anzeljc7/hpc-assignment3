@@ -1,0 +1,23 @@
+rm -f lennard-jones.o gifenc.o main.o lj.out
+nvcc -Wno-deprecated-gpu-targets -gencode=arch=compute_70,code=sm_70 -O3 -Xcompiler --openmp,-Wall -c -o lennard-jones.o src/lennard-jones.cu
+nvcc -Wno-deprecated-gpu-targets -gencode=arch=compute_70,code=sm_70 -O3 -Xcompiler --openmp,-Wall -c -o gifenc.o src/gifenc.c
+nvcc -Wno-deprecated-gpu-targets -gencode=arch=compute_70,code=sm_70 -O3 -Xcompiler --openmp,-Wall -c -o main.o src/main.c
+nvcc -Wno-deprecated-gpu-targets -gencode=arch=compute_70,code=sm_70 -O3 -Xcompiler --openmp,-Wall lennard-jones.o gifenc.o main.o -o lj.out -lm
+==========================================
+Začenjam GPU meritve...
+Testiram mrežo: 1000 delcev, 5000 korakov
+==========================================
+--- Zagon 1/5 ---
+
+Finished simulation.
+Final KE:   741.4781 | delta: +241.4781
+Final PE: -1616.1668 | delta: -241.4730
+Final E:   -874.6887 | delta: +0.0051
+Simulation time 5000 steps: 0.266 seconds
+
+--> Izmerjen čas za zagon 1:     0.266 s
+
+--- Zagon 2/5 ---
+[2026-05-03T10:12:26.399] error: execve(): /d/hpc/home/tb1565/hpc-assignment3/./lj.out: No such file or directory
+srun: error: wn201: task 0: Exited with exit code 2
+  Napaka: časa nisem našel v izpisu za N=1000.
