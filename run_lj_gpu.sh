@@ -18,9 +18,9 @@ make
 # ==========================================
 # NASTAVITVE MERITEV
 # ==========================================
-PROGRAM_NAME="gpu-timotej1-16"
+PROGRAM_NAME="gpu-timotej2-256"
 RUNS=5
-N=8000
+N=1000
 NSTEPS=5000
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
