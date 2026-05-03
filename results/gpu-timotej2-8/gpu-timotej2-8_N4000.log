@@ -1,0 +1,63 @@
+rm -f lennard-jones.o gifenc.o main.o lj.out
+nvcc -Wno-deprecated-gpu-targets -gencode=arch=compute_70,code=sm_70 -O3 -Xcompiler --openmp,-Wall -c -o lennard-jones.o src/lennard-jones.cu
+nvcc -Wno-deprecated-gpu-targets -gencode=arch=compute_70,code=sm_70 -O3 -Xcompiler --openmp,-Wall -c -o gifenc.o src/gifenc.c
+nvcc -Wno-deprecated-gpu-targets -gencode=arch=compute_70,code=sm_70 -O3 -Xcompiler --openmp,-Wall -c -o main.o src/main.c
+nvcc -Wno-deprecated-gpu-targets -gencode=arch=compute_70,code=sm_70 -O3 -Xcompiler --openmp,-Wall lennard-jones.o gifenc.o main.o -o lj.out -lm
+==========================================
+Začenjam GPU meritve...
+Testiram mrežo: 4000 delcev, 5000 korakov
+==========================================
+--- Zagon 1/5 ---
+
+Finished simulation.
+Final KE:  5081.2837 | delta: +3081.2837
+Final PE: -6621.9514 | delta: -3081.5451
+Final E:  -1540.6677 | delta: -0.2613
+Simulation time 5000 steps: 0.311 seconds
+
+--> Izmerjen čas za zagon 1:     0.311 s
+
+--- Zagon 2/5 ---
+
+Finished simulation.
+Final KE:  5085.0411 | delta: +3085.0411
+Final PE: -6625.7024 | delta: -3085.2961
+Final E:  -1540.6614 | delta: -0.2550
+Simulation time 5000 steps: 0.274 seconds
+
+--> Izmerjen čas za zagon 2:     0.274 s
+
+--- Zagon 3/5 ---
+
+Finished simulation.
+Final KE:  5075.0022 | delta: +3075.0022
+Final PE: -6615.6833 | delta: -3075.2769
+Final E:  -1540.6811 | delta: -0.2747
+Simulation time 5000 steps: 0.263 seconds
+
+--> Izmerjen čas za zagon 3:     0.263 s
+
+--- Zagon 4/5 ---
+
+Finished simulation.
+Final KE:  5084.3955 | delta: +3084.3955
+Final PE: -6625.0723 | delta: -3084.6660
+Final E:  -1540.6768 | delta: -0.2705
+Simulation time 5000 steps: 0.264 seconds
+
+--> Izmerjen čas za zagon 4:     0.264 s
+
+--- Zagon 5/5 ---
+
+Finished simulation.
+Final KE:  5081.0847 | delta: +3081.0847
+Final PE: -6621.7546 | delta: -3081.3482
+Final E:  -1540.6699 | delta: -0.2635
+Simulation time 5000 steps: 0.262 seconds
+
+--> Izmerjen čas za zagon 5:     0.262 s
+
+==========================================
+  POVPREČJE ZA N=4000 =  0.274800 s
+==========================================
+Log datoteka je shranjena v: results/gpu-timotej2-8/gpu-timotej2-8_N4000.log

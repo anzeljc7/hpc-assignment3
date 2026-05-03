@@ -18,7 +18,7 @@ make
 # ==========================================
 # NASTAVITVE MERITEV
 # ==========================================
-PROGRAM_NAME="gpu-timotej2-256"
+PROGRAM_NAME="gpu-timotej2-8"
 RUNS=5
 N=1000
 NSTEPS=5000
