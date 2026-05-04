@@ -13,9 +13,9 @@ Finished simulation.
 Final KE:  9679.6797 | delta: +5679.6797
 Final PE: -14704.4778 | delta: -5679.9947
 Final E:  -5024.7982 | delta: -0.3150
-Simulation time 5000 steps: 1.649 seconds
+Simulation time 5000 steps: 1.497 seconds
 
---> Izmerjen čas za zagon 1:     1.649 s
+--> Izmerjen čas za zagon 1:     1.497 s
 
 --- Zagon 2/5 ---
 
@@ -23,9 +23,9 @@ Finished simulation.
 Final KE:  9679.6797 | delta: +5679.6797
 Final PE: -14704.4778 | delta: -5679.9947
 Final E:  -5024.7982 | delta: -0.3150
-Simulation time 5000 steps: 1.621 seconds
+Simulation time 5000 steps: 1.491 seconds
 
---> Izmerjen čas za zagon 2:     1.621 s
+--> Izmerjen čas za zagon 2:     1.491 s
 
 --- Zagon 3/5 ---
 
@@ -33,9 +33,9 @@ Finished simulation.
 Final KE:  9679.6797 | delta: +5679.6797
 Final PE: -14704.4778 | delta: -5679.9947
 Final E:  -5024.7982 | delta: -0.3150
-Simulation time 5000 steps: 1.638 seconds
+Simulation time 5000 steps: 1.486 seconds
 
---> Izmerjen čas za zagon 3:     1.638 s
+--> Izmerjen čas za zagon 3:     1.486 s
 
 --- Zagon 4/5 ---
 
@@ -43,9 +43,9 @@ Finished simulation.
 Final KE:  9679.6797 | delta: +5679.6797
 Final PE: -14704.4778 | delta: -5679.9947
 Final E:  -5024.7982 | delta: -0.3150
-Simulation time 5000 steps: 1.620 seconds
+Simulation time 5000 steps: 1.498 seconds
 
---> Izmerjen čas za zagon 4:     1.620 s
+--> Izmerjen čas za zagon 4:     1.498 s
 
 --- Zagon 5/5 ---
 
@@ -53,11 +53,11 @@ Finished simulation.
 Final KE:  9679.6797 | delta: +5679.6797
 Final PE: -14704.4778 | delta: -5679.9947
 Final E:  -5024.7982 | delta: -0.3150
-Simulation time 5000 steps: 1.641 seconds
+Simulation time 5000 steps: 1.453 seconds
 
---> Izmerjen čas za zagon 5:     1.641 s
+--> Izmerjen čas za zagon 5:     1.453 s
 
 ==========================================
-  POVPREČJE ZA N=8000 =  1.633800 s
+  POVPREČJE ZA N=8000 =  1.485000 s
 ==========================================
-Log datoteka je shranjena v: results/lj_cpu_optimized/lj_cpu_optimized_N8000.log
+Log datoteka je shranjena v: results/lj_cpu_optimized_static_red/lj_cpu_optimized_static_red_N8000.log

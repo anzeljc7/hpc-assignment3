@@ -70,35 +70,44 @@
 
 #define CELL_PAIR_TYPES 5
 
-#define CUDA_CHECK(call)                                                         \
-    do {                                                                        \
-        cudaError_t _err = (call);                                               \
-        if (_err != cudaSuccess) {                                               \
-            fprintf(stderr, "CUDA error %s:%d: %s\n", __FILE__, __LINE__,       \
-                    cudaGetErrorString(_err));                                  \
-            exit(EXIT_FAILURE);                                                  \
-        }                                                                       \
+#define CUDA_CHECK(call)                                                  \
+    do                                                                    \
+    {                                                                     \
+        cudaError_t _err = (call);                                        \
+        if (_err != cudaSuccess)                                          \
+        {                                                                 \
+            fprintf(stderr, "CUDA error %s:%d: %s\n", __FILE__, __LINE__, \
+                    cudaGetErrorString(_err));                            \
+            exit(EXIT_FAILURE);                                           \
+        }                                                                 \
     } while (0)
 
 #if GENERATE_GIF
 uint8_t palette[] = {0, 0, 0, 255, 255, 0};
 
-void set_pixel(uint8_t *img, int w, int h, int x, int y, uint8_t index) {
-    if (x < 0 || y < 0 || x >= w || y >= h) {
+void set_pixel(uint8_t *img, int w, int h, int x, int y, uint8_t index)
+{
+    if (x < 0 || y < 0 || x >= w || y >= h)
+    {
         return;
     }
     img[(size_t)y * (size_t)w + (size_t)x] = index;
 }
 
-void render_frame_gif(ge_GIF *gif, const Particle *particles, unsigned int n, double box_size) {
+void render_frame_gif(ge_GIF *gif, const Particle *particles, unsigned int n, double box_size)
+{
     memset(gif->frame, 0, FRAME_WIDTH * FRAME_HEIGHT);
-    for (unsigned int i = 0; i < n; ++i) {
+    for (unsigned int i = 0; i < n; ++i)
+    {
         int px = (int)(particles[i].x / box_size * (double)(FRAME_WIDTH - 1));
         int py = (int)(particles[i].y / box_size * (double)(FRAME_HEIGHT - 1));
         py = (FRAME_HEIGHT - 1) - py;
-        for (int dy = -FRAME_PARTICLE_RADIUS; dy <= FRAME_PARTICLE_RADIUS; ++dy) {
-            for (int dx = -FRAME_PARTICLE_RADIUS; dx <= FRAME_PARTICLE_RADIUS; ++dx) {
-                if (dx * dx + dy * dy <= FRAME_PARTICLE_RADIUS * FRAME_PARTICLE_RADIUS) {
+        for (int dy = -FRAME_PARTICLE_RADIUS; dy <= FRAME_PARTICLE_RADIUS; ++dy)
+        {
+            for (int dx = -FRAME_PARTICLE_RADIUS; dx <= FRAME_PARTICLE_RADIUS; ++dx)
+            {
+                if (dx * dx + dy * dy <= FRAME_PARTICLE_RADIUS * FRAME_PARTICLE_RADIUS)
+                {
                     set_pixel(gif->frame, FRAME_WIDTH, FRAME_HEIGHT, px + dx, py + dy, 1);
                 }
             }
@@ -112,14 +121,17 @@ void render_frame_gif(ge_GIF *gif, const Particle *particles, unsigned int n, do
 // -----------------------------------------------------------------------------
 
 /* Enaka pomožna funkcija za naključna števila kot v osnovni kodi. Uporablja se samo pri inicializaciji. */
-double random_double(void) {
+double random_double(void)
+{
     return (double)rand() / (double)RAND_MAX;
 }
 
 /* Javna CPE funkcija za kinetično energijo. Ohranimo jo zaradi združljivosti z originalnim vmesnikom. */
-double compute_ke(const Particle *particles, unsigned int n) {
+double compute_ke(const Particle *particles, unsigned int n)
+{
     double ke = 0.0;
-    for (unsigned int i = 0; i < n; ++i) {
+    for (unsigned int i = 0; i < n; ++i)
+    {
         const Particle *p = &particles[i];
         ke += 0.5 * (p->vx * p->vx + p->vy * p->vy);
     }
@@ -133,7 +145,8 @@ double compute_ke(const Particle *particles, unsigned int n) {
  */
 int initialize_particles(Particle *particles, unsigned int n, double box_size,
                          double placement_fraction, unsigned int seed,
-                         double temperature) {
+                         double temperature)
+{
     srand(seed);
 
     unsigned int n_side = (unsigned int)ceil(sqrt((double)n));
@@ -144,7 +157,8 @@ int initialize_particles(Particle *particles, unsigned int n, double box_size,
     double mean_vx = 0.0;
     double mean_vy = 0.0;
 
-    for (unsigned int k = 0; k < n; ++k) {
+    for (unsigned int k = 0; k < n; ++k)
+    {
         double x0 = offset + (0.5 + (double)(k % n_side)) * delta;
         double y0 = offset + (0.5 + (double)(k / n_side)) * delta;
 
@@ -163,19 +177,22 @@ int initialize_particles(Particle *particles, unsigned int n, double box_size,
     mean_vy /= (double)n;
 
     double ke = 0.0;
-    for (unsigned int k = 0; k < n; ++k) {
+    for (unsigned int k = 0; k < n; ++k)
+    {
         particles[k].vx -= mean_vx;
         particles[k].vy -= mean_vy;
         ke += 0.5 * (particles[k].vx * particles[k].vx + particles[k].vy * particles[k].vy);
     }
 
     double current_temperature = ke / (double)n;
-    if (current_temperature <= 0.0) {
+    if (current_temperature <= 0.0)
+    {
         return 0;
     }
 
     double scale = sqrt(temperature / current_temperature);
-    for (unsigned int k = 0; k < n; ++k) {
+    for (unsigned int k = 0; k < n; ++k)
+    {
         particles[k].vx *= scale;
         particles[k].vy *= scale;
     }
@@ -183,20 +200,25 @@ int initialize_particles(Particle *particles, unsigned int n, double box_size,
     return 1;
 }
 
-void wrap_positions(Particle *particles, unsigned int n, double box_size) {
-    for (unsigned int i = 0; i < n; ++i) {
+void wrap_positions(Particle *particles, unsigned int n, double box_size)
+{
+    for (unsigned int i = 0; i < n; ++i)
+    {
         Particle *p = &particles[i];
         double wx = fmod(p->x, box_size);
         double wy = fmod(p->y, box_size);
-        if (wx < 0.0) wx += box_size;
-        if (wy < 0.0) wy += box_size;
+        if (wx < 0.0)
+            wx += box_size;
+        if (wy < 0.0)
+            wy += box_size;
         p->x = wx;
         p->y = wy;
     }
 }
 
 /* Premaknjen Lennard-Jones potencial pri radiju odreza. */
-static __host__ __device__ inline double lj_v_shift(void) {
+static __host__ __device__ inline double lj_v_shift(void)
+{
     const double sr = SIGMA / R_CUT;
     const double sr2 = sr * sr;
     const double sr6 = sr2 * sr2 * sr2;
@@ -204,7 +226,8 @@ static __host__ __device__ inline double lj_v_shift(void) {
     return 4.0 * EPSILON * (sr12 - sr6);
 }
 
-double compute_v_shift(void) {
+double compute_v_shift(void)
+{
     return lj_v_shift();
 }
 
@@ -214,8 +237,10 @@ double compute_v_shift(void) {
  * delcu j dodamo nasprotno silo. Funkcija se ne uporablja v run_simulation,
  * vendar jo ohranimo zaradi združljivosti z originalnim vmesnikom in za preverjanje.
  */
-double compute_forces(Particle *particles, unsigned int n, double box_size) {
-    for (unsigned int i = 0; i < n; ++i) {
+double compute_forces(Particle *particles, unsigned int n, double box_size)
+{
+    for (unsigned int i = 0; i < n; ++i)
+    {
         particles[i].fx = 0.0;
         particles[i].fy = 0.0;
     }
@@ -225,18 +250,25 @@ double compute_forces(Particle *particles, unsigned int n, double box_size) {
     const double v_shift = compute_v_shift();
     double pe = 0.0;
 
-    for (unsigned int i = 0; i < n; ++i) {
-        for (unsigned int j = i + 1; j < n; ++j) {
+    for (unsigned int i = 0; i < n; ++i)
+    {
+        for (unsigned int j = i + 1; j < n; ++j)
+        {
             double dx = particles[i].x - particles[j].x;
             double dy = particles[i].y - particles[j].y;
 
-            if (dx > half_box) dx -= box_size;
-            else if (dx < -half_box) dx += box_size;
-            if (dy > half_box) dy -= box_size;
-            else if (dy < -half_box) dy += box_size;
+            if (dx > half_box)
+                dx -= box_size;
+            else if (dx < -half_box)
+                dx += box_size;
+            if (dy > half_box)
+                dy -= box_size;
+            else if (dy < -half_box)
+                dy += box_size;
 
             double r2 = dx * dx + dy * dy;
-            if (r2 < rcut2 && r2 > 0.0) {
+            if (r2 < rcut2 && r2 > 0.0)
+            {
                 double inv_r2 = 1.0 / r2;
                 double sr2 = (SIGMA * SIGMA) * inv_r2;
                 double sr6 = sr2 * sr2 * sr2;
@@ -259,8 +291,10 @@ double compute_forces(Particle *particles, unsigned int n, double box_size) {
 }
 
 /* CPE fallback za Leapfrog korak. Spodnja CUDA pot uporablja enakovredne GPE kernele. */
-double leapfrog_step(Particle *particles, unsigned int n, double box_size) {
-    for (unsigned int i = 0; i < n; ++i) {
+double leapfrog_step(Particle *particles, unsigned int n, double box_size)
+{
+    for (unsigned int i = 0; i < n; ++i)
+    {
         Particle *p = &particles[i];
         p->vx += 0.5 * DT * p->fx;
         p->vy += 0.5 * DT * p->fy;
@@ -271,7 +305,8 @@ double leapfrog_step(Particle *particles, unsigned int n, double box_size) {
     wrap_positions(particles, n, box_size);
     double pe = compute_forces(particles, n, box_size);
 
-    for (unsigned int i = 0; i < n; ++i) {
+    for (unsigned int i = 0; i < n; ++i)
+    {
         Particle *p = &particles[i];
         p->vx += 0.5 * DT * p->fx;
         p->vy += 0.5 * DT * p->fy;
@@ -285,9 +320,12 @@ double leapfrog_step(Particle *particles, unsigned int n, double box_size) {
 // -----------------------------------------------------------------------------
 
 /* Periodično zavije indeks celice v interval [0, nc). */
-static __device__ __forceinline__ int wrap_cell(int c, int nc) {
-    if (c < 0) return c + nc;
-    if (c >= nc) return c - nc;
+static __device__ __forceinline__ int wrap_cell(int c, int nc)
+{
+    if (c < 0)
+        return c + nc;
+    if (c >= nc)
+        return c - nc;
     return c;
 }
 
@@ -303,9 +341,11 @@ __global__ void pack_particles_kernel(const Particle *__restrict__ p,
                                       double *__restrict__ vy,
                                       double *__restrict__ fx,
                                       double *__restrict__ fy,
-                                      unsigned int n) {
+                                      unsigned int n)
+{
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
     x[i] = p[i].x;
     y[i] = p[i].y;
     vx[i] = p[i].vx;
@@ -322,9 +362,11 @@ __global__ void unpack_particles_kernel(Particle *__restrict__ p,
                                         const double *__restrict__ vy,
                                         const double *__restrict__ fx,
                                         const double *__restrict__ fy,
-                                        unsigned int n) {
+                                        unsigned int n)
+{
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
     p[i].x = x[i];
     p[i].y = y[i];
     p[i].vx = vx[i];
@@ -346,9 +388,11 @@ __global__ void integrate_first_kernel(double *__restrict__ x,
                                        const double *__restrict__ fx,
                                        const double *__restrict__ fy,
                                        unsigned int n,
-                                       double box_size) {
+                                       double box_size)
+{
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
 
     double vxi = vx[i] + 0.5 * DT * fx[i];
     double vyi = vy[i] + 0.5 * DT * fy[i];
@@ -356,10 +400,14 @@ __global__ void integrate_first_kernel(double *__restrict__ x,
     double yi = y[i] + DT * vyi;
 
     /* Periodični robni pogoji. Ker je DT majhen, je običajno dovolj en premik čez rob. */
-    if (xi >= box_size) xi -= box_size;
-    else if (xi < 0.0) xi += box_size;
-    if (yi >= box_size) yi -= box_size;
-    else if (yi < 0.0) yi += box_size;
+    if (xi >= box_size)
+        xi -= box_size;
+    else if (xi < 0.0)
+        xi += box_size;
+    if (yi >= box_size)
+        yi -= box_size;
+    else if (yi < 0.0)
+        yi += box_size;
 
     x[i] = xi;
     y[i] = yi;
@@ -372,9 +420,11 @@ __global__ void integrate_second_kernel(double *__restrict__ vx,
                                         double *__restrict__ vy,
                                         const double *__restrict__ fx,
                                         const double *__restrict__ fy,
-                                        unsigned int n) {
+                                        unsigned int n)
+{
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
 
     vx[i] += 0.5 * DT * fx[i];
     vy[i] += 0.5 * DT * fy[i];
@@ -383,28 +433,35 @@ __global__ void integrate_second_kernel(double *__restrict__ vx,
 /* Pred izračunom novih sil ponastavi tabele sil. */
 __global__ void clear_forces_kernel(double *__restrict__ fx,
                                     double *__restrict__ fy,
-                                    unsigned int n) {
+                                    unsigned int n)
+{
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
     fx[i] = 0.0;
     fy[i] = 0.0;
 }
 
 /* Ponastavi splošno tabelo double vrednosti; uporablja se za člene potencialne energije. */
 __global__ void clear_double_kernel(double *__restrict__ values,
-                                    unsigned int n) {
+                                    unsigned int n)
+{
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
     values[i] = 0.0;
 }
 
 /* Pred ponovno gradnjo cell-list strukture ponastavi število delcev v vsaki celici. */
 __global__ void clear_cells_kernel(int *__restrict__ cell_counts,
                                    int *__restrict__ overflow,
-                                   int total_cells) {
+                                   int total_cells)
+{
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < total_cells) cell_counts[i] = 0;
-    if (i == 0) *overflow = 0;
+    if (i < total_cells)
+        cell_counts[i] = 0;
+    if (i == 0)
+        *overflow = 0;
 }
 
 /*
@@ -419,25 +476,34 @@ __global__ void build_cells_kernel(const double *__restrict__ x,
                                    int *__restrict__ overflow,
                                    unsigned int n,
                                    int nc,
-                                   double cell_size) {
+                                   double cell_size)
+{
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
 
     int cx = (int)(x[i] / cell_size);
     int cy = (int)(y[i] / cell_size);
 
     /* Numerična varnost za koordinate, ki so zelo blizu box_size. */
-    if (cx < 0) cx = 0;
-    if (cy < 0) cy = 0;
-    if (cx >= nc) cx = nc - 1;
-    if (cy >= nc) cy = nc - 1;
+    if (cx < 0)
+        cx = 0;
+    if (cy < 0)
+        cy = 0;
+    if (cx >= nc)
+        cx = nc - 1;
+    if (cy >= nc)
+        cy = nc - 1;
 
     int cell = cy * nc + cx;
     int slot = atomicAdd(&cell_counts[cell], 1);
 
-    if (slot < MAX_PARTICLES_PER_CELL) {
+    if (slot < MAX_PARTICLES_PER_CELL)
+    {
         cell_particles[cell * MAX_PARTICLES_PER_CELL + slot] = (int)i;
-    } else {
+    }
+    else
+    {
         atomicExch(overflow, 1);
     }
 }
@@ -459,16 +525,33 @@ __global__ void build_cells_kernel(const double *__restrict__ x,
 static __device__ __forceinline__ void decode_cell_pair(int cell,
                                                         int pair_type,
                                                         int nc,
-                                                        int *cell_b) {
+                                                        int *cell_b)
+{
     int cy = cell / nc;
     int cx = cell - cy * nc;
 
     int ox = 0;
     int oy = 0;
-    if (pair_type == 1) { ox = 1; oy = 0; }
-    else if (pair_type == 2) { ox = 0; oy = 1; }
-    else if (pair_type == 3) { ox = 1; oy = 1; }
-    else if (pair_type == 4) { ox = 1; oy = -1; }
+    if (pair_type == 1)
+    {
+        ox = 1;
+        oy = 0;
+    }
+    else if (pair_type == 2)
+    {
+        ox = 0;
+        oy = 1;
+    }
+    else if (pair_type == 3)
+    {
+        ox = 1;
+        oy = 1;
+    }
+    else if (pair_type == 4)
+    {
+        ox = 1;
+        oy = -1;
+    }
 
     int bx = wrap_cell(cx + ox, nc);
     int by = wrap_cell(cy + oy, nc);
@@ -500,7 +583,8 @@ __global__ void compute_forces_newton_cell_kernel(const double *__restrict__ x,
                                                   const int *__restrict__ cell_particles,
                                                   unsigned int n,
                                                   double box_size,
-                                                  int nc) {
+                                                  int nc)
+{
     unsigned int tid = threadIdx.x;
     unsigned int pair_index = blockIdx.x;
     int cell_a = (int)(pair_index / CELL_PAIR_TYPES);
@@ -511,8 +595,10 @@ __global__ void compute_forces_newton_cell_kernel(const double *__restrict__ x,
 
     int count_a = cell_counts[cell_a];
     int count_b = cell_counts[cell_b];
-    if (count_a > MAX_PARTICLES_PER_CELL) count_a = MAX_PARTICLES_PER_CELL;
-    if (count_b > MAX_PARTICLES_PER_CELL) count_b = MAX_PARTICLES_PER_CELL;
+    if (count_a > MAX_PARTICLES_PER_CELL)
+        count_a = MAX_PARTICLES_PER_CELL;
+    if (count_b > MAX_PARTICLES_PER_CELL)
+        count_b = MAX_PARTICLES_PER_CELL;
 
     const double half_box = 0.5 * box_size;
     const double rcut2 = R_CUT * R_CUT;
@@ -520,23 +606,31 @@ __global__ void compute_forces_newton_cell_kernel(const double *__restrict__ x,
 
     double local_pe = 0.0;
 
-    if (pair_type == 0) {
+    if (pair_type == 0)
+    {
         /* Ista celica: obdelamo samo pare a<b, da se izognemo podvajanju dela. */
-        for (int a = 0; a < count_a; ++a) {
+        for (int a = 0; a < count_a; ++a)
+        {
             int i = cell_particles[cell_a * MAX_PARTICLES_PER_CELL + a];
-            for (int b = a + 1 + (int)tid; b < count_a; b += blockDim.x) {
+            for (int b = a + 1 + (int)tid; b < count_a; b += blockDim.x)
+            {
                 int j = cell_particles[cell_a * MAX_PARTICLES_PER_CELL + b];
 
                 double dx = x[i] - x[j];
                 double dy = y[i] - y[j];
 
-                if (dx > half_box) dx -= box_size;
-                else if (dx < -half_box) dx += box_size;
-                if (dy > half_box) dy -= box_size;
-                else if (dy < -half_box) dy += box_size;
+                if (dx > half_box)
+                    dx -= box_size;
+                else if (dx < -half_box)
+                    dx += box_size;
+                if (dy > half_box)
+                    dy -= box_size;
+                else if (dy < -half_box)
+                    dy += box_size;
 
                 double r2 = dx * dx + dy * dy;
-                if (r2 < rcut2 && r2 > 0.0) {
+                if (r2 < rcut2 && r2 > 0.0)
+                {
                     double inv_r2 = 1.0 / r2;
                     double sr2 = (SIGMA * SIGMA) * inv_r2;
                     double sr6 = sr2 * sr2 * sr2;
@@ -554,10 +648,13 @@ __global__ void compute_forces_newton_cell_kernel(const double *__restrict__ x,
                 }
             }
         }
-    } else {
+    }
+    else
+    {
         /* Dve različni sosednji celici: vsi križni pari so unikatni. */
         int total_cross_pairs = count_a * count_b;
-        for (int linear = (int)tid; linear < total_cross_pairs; linear += blockDim.x) {
+        for (int linear = (int)tid; linear < total_cross_pairs; linear += blockDim.x)
+        {
             int a = linear / count_b;
             int b = linear - a * count_b;
 
@@ -567,13 +664,18 @@ __global__ void compute_forces_newton_cell_kernel(const double *__restrict__ x,
             double dx = x[i] - x[j];
             double dy = y[i] - y[j];
 
-            if (dx > half_box) dx -= box_size;
-            else if (dx < -half_box) dx += box_size;
-            if (dy > half_box) dy -= box_size;
-            else if (dy < -half_box) dy += box_size;
+            if (dx > half_box)
+                dx -= box_size;
+            else if (dx < -half_box)
+                dx += box_size;
+            if (dy > half_box)
+                dy -= box_size;
+            else if (dy < -half_box)
+                dy += box_size;
 
             double r2 = dx * dx + dy * dy;
-            if (r2 < rcut2 && r2 > 0.0) {
+            if (r2 < rcut2 && r2 > 0.0)
+            {
                 double inv_r2 = 1.0 / r2;
                 double sr2 = (SIGMA * SIGMA) * inv_r2;
                 double sr6 = sr2 * sr2 * sr2;
@@ -597,14 +699,17 @@ __global__ void compute_forces_newton_cell_kernel(const double *__restrict__ x,
     s_pe[tid] = local_pe;
     __syncthreads();
 
-    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1) {
-        if (tid < stride) {
+    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
+    {
+        if (tid < stride)
+        {
             s_pe[tid] += s_pe[tid + stride];
         }
         __syncthreads();
     }
 
-    if (tid == 0) {
+    if (tid == 0)
+    {
         pe_terms[pair_index] = s_pe[0];
     }
 }
@@ -620,10 +725,12 @@ __global__ void compute_forces_newton_allpairs_kernel(const double *__restrict__
                                                       double *__restrict__ fy,
                                                       double *__restrict__ pe_terms,
                                                       unsigned int n,
-                                                      double box_size) {
+                                                      double box_size)
+{
     unsigned int i = blockIdx.x;
     unsigned int tid = threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
 
     const double xi = x[i];
     const double yi = y[i];
@@ -633,17 +740,23 @@ __global__ void compute_forces_newton_allpairs_kernel(const double *__restrict__
 
     double local_pe = 0.0;
 
-    for (unsigned int j = i + 1 + tid; j < n; j += blockDim.x) {
+    for (unsigned int j = i + 1 + tid; j < n; j += blockDim.x)
+    {
         double dx = xi - x[j];
         double dy = yi - y[j];
 
-        if (dx > half_box) dx -= box_size;
-        else if (dx < -half_box) dx += box_size;
-        if (dy > half_box) dy -= box_size;
-        else if (dy < -half_box) dy += box_size;
+        if (dx > half_box)
+            dx -= box_size;
+        else if (dx < -half_box)
+            dx += box_size;
+        if (dy > half_box)
+            dy -= box_size;
+        else if (dy < -half_box)
+            dy += box_size;
 
         double r2 = dx * dx + dy * dy;
-        if (r2 < rcut2 && r2 > 0.0) {
+        if (r2 < rcut2 && r2 > 0.0)
+        {
             double inv_r2 = 1.0 / r2;
             double sr2 = (SIGMA * SIGMA) * inv_r2;
             double sr6 = sr2 * sr2 * sr2;
@@ -665,14 +778,17 @@ __global__ void compute_forces_newton_allpairs_kernel(const double *__restrict__
     s_pe[tid] = local_pe;
     __syncthreads();
 
-    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1) {
-        if (tid < stride) {
+    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
+    {
+        if (tid < stride)
+        {
             s_pe[tid] += s_pe[tid + stride];
         }
         __syncthreads();
     }
 
-    if (tid == 0) {
+    if (tid == 0)
+    {
         pe_terms[i] = s_pe[0];
     }
 }
@@ -681,36 +797,44 @@ __global__ void compute_forces_newton_allpairs_kernel(const double *__restrict__
 __global__ void kinetic_terms_kernel(const double *__restrict__ vx,
                                      const double *__restrict__ vy,
                                      double *__restrict__ terms,
-                                     unsigned int n) {
+                                     unsigned int n)
+{
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
     terms[i] = 0.5 * (vx[i] * vx[i] + vy[i] * vy[i]);
 }
 
 /* Splošna redukcija po blokih: vsak blok reducira do 2*blockDim.x vhodnih vrednosti. */
 __global__ void reduce_sum_kernel(const double *__restrict__ in,
                                   double *__restrict__ out,
-                                  unsigned int n) {
+                                  unsigned int n)
+{
     unsigned int tid = threadIdx.x;
     unsigned int i = blockIdx.x * (blockDim.x * 2) + threadIdx.x;
 
     extern __shared__ double sdata[];
     double sum = 0.0;
 
-    if (i < n) sum += in[i];
-    if (i + blockDim.x < n) sum += in[i + blockDim.x];
+    if (i < n)
+        sum += in[i];
+    if (i + blockDim.x < n)
+        sum += in[i + blockDim.x];
 
     sdata[tid] = sum;
     __syncthreads();
 
-    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1) {
-        if (tid < stride) {
+    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
+    {
+        if (tid < stride)
+        {
             sdata[tid] += sdata[tid + stride];
         }
         __syncthreads();
     }
 
-    if (tid == 0) {
+    if (tid == 0)
+    {
         out[blockIdx.x] = sdata[0];
     }
 }
@@ -719,14 +843,17 @@ __global__ void reduce_sum_kernel(const double *__restrict__ in,
 static double reduce_device_sum(const double *d_values,
                                 double *d_tmp1,
                                 double *d_tmp2,
-                                unsigned int n) {
-    if (n == 0) return 0.0;
+                                unsigned int n)
+{
+    if (n == 0)
+        return 0.0;
 
     const double *in = d_values;
     double *out = d_tmp1;
     unsigned int cur_n = n;
 
-    while (cur_n > 1) {
+    while (cur_n > 1)
+    {
         unsigned int blocks = (cur_n + (REDUCE_THREADS * 2 - 1)) / (REDUCE_THREADS * 2);
         reduce_sum_kernel<<<blocks, REDUCE_THREADS, REDUCE_THREADS * sizeof(double)>>>(in, out, cur_n);
         CUDA_CHECK(cudaGetLastError());
@@ -746,7 +873,8 @@ static double compute_ke_gpu(const double *d_vx,
                              double *d_terms,
                              double *d_tmp1,
                              double *d_tmp2,
-                             unsigned int n) {
+                             unsigned int n)
+{
     unsigned int blocks = (n + REDUCE_THREADS - 1) / REDUCE_THREADS;
     kinetic_terms_kernel<<<blocks, REDUCE_THREADS>>>(d_vx, d_vy, d_terms, n);
     CUDA_CHECK(cudaGetLastError());
@@ -761,7 +889,8 @@ static void build_cells_gpu(const double *d_x,
                             unsigned int n,
                             int nc,
                             double cell_size,
-                            int total_cells) {
+                            int total_cells)
+{
     unsigned int cell_blocks = (total_cells + VECTOR_THREADS - 1) / VECTOR_THREADS;
     clear_cells_kernel<<<cell_blocks, VECTOR_THREADS>>>(d_cell_counts, d_overflow, total_cells);
     CUDA_CHECK(cudaGetLastError());
@@ -791,12 +920,14 @@ static unsigned int compute_forces_gpu(const double *d_x,
                                        int nc,
                                        double cell_size,
                                        int total_cells,
-                                       int use_cells) {
+                                       int use_cells)
+{
     unsigned int vector_blocks = (n + VECTOR_THREADS - 1) / VECTOR_THREADS;
     clear_forces_kernel<<<vector_blocks, VECTOR_THREADS>>>(d_fx, d_fy, n);
     CUDA_CHECK(cudaGetLastError());
 
-    if (use_cells) {
+    if (use_cells)
+    {
         unsigned int total_cell_pairs = (unsigned int)total_cells * CELL_PAIR_TYPES;
         unsigned int term_blocks = (total_cell_pairs + VECTOR_THREADS - 1) / VECTOR_THREADS;
         clear_double_kernel<<<term_blocks, VECTOR_THREADS>>>(d_pe_terms, total_cell_pairs);
@@ -808,7 +939,8 @@ static unsigned int compute_forces_gpu(const double *d_x,
 #if CHECK_CELL_OVERFLOW
         int h_overflow = 0;
         CUDA_CHECK(cudaMemcpy(&h_overflow, d_overflow, sizeof(int), cudaMemcpyDeviceToHost));
-        if (h_overflow) {
+        if (h_overflow)
+        {
             fprintf(stderr, "Cell list overflow. Increase MAX_PARTICLES_PER_CELL.\n");
             exit(EXIT_FAILURE);
         }
@@ -839,13 +971,15 @@ SimulationResult run_simulation(Particle *particles,
                                 unsigned int n,
                                 unsigned int nsteps,
                                 double box_size,
-                                int log_steps) {
+                                int log_steps)
+{
     SimulationResult out;
     memset(&out, 0, sizeof(out));
     out.n = n;
     out.particles = particles;
 
-    if (n == 0) {
+    if (n == 0)
+    {
         return out;
     }
 
@@ -859,7 +993,8 @@ SimulationResult run_simulation(Particle *particles,
      * cell_size = box/nc nikoli ni manjši od R_CUT.
      */
     int nc = (int)(box_size / R_CUT);
-    if (nc < 1) nc = 1;
+    if (nc < 1)
+        nc = 1;
     double cell_size = box_size / (double)nc;
     int total_cells = nc * nc;
 
@@ -891,7 +1026,8 @@ SimulationResult run_simulation(Particle *particles,
     CUDA_CHECK(cudaMalloc((void **)&d_tmp1, reduce_bytes));
     CUDA_CHECK(cudaMalloc((void **)&d_tmp2, reduce_bytes));
 
-    if (use_cells) {
+    if (use_cells)
+    {
         CUDA_CHECK(cudaMalloc((void **)&d_cell_counts, (size_t)total_cells * sizeof(int)));
         CUDA_CHECK(cudaMalloc((void **)&d_cell_particles,
                               (size_t)total_cells * MAX_PARTICLES_PER_CELL * sizeof(int)));
@@ -922,15 +1058,19 @@ SimulationResult run_simulation(Particle *particles,
 
 #if GENERATE_GIF
     ge_GIF *gif = ge_new_gif(GIF_FILE, (uint16_t)FRAME_WIDTH, (uint16_t)FRAME_HEIGHT, palette, 8, -1, 0);
-    if (!gif) {
+    if (!gif)
+    {
         fprintf(stderr, "Warning: failed to create GIF output %s\n", GIF_FILE);
-    } else {
+    }
+    else
+    {
         render_frame_gif(gif, particles, n, box_size);
         ge_add_frame(gif, FRAME_DELAY);
     }
 #endif
 
-    for (unsigned int step = 0; step < nsteps; ++step) {
+    for (unsigned int step = 0; step < nsteps; ++step)
+    {
         /* 1) Prva polovica Leapfrog koraka: posodobimo hitrosti in pozicije. */
         integrate_first_kernel<<<vector_blocks, VECTOR_THREADS>>>(d_x, d_y, d_vx, d_vy,
                                                                   d_fx, d_fy, n, box_size);
@@ -946,7 +1086,8 @@ SimulationResult run_simulation(Particle *particles,
         CUDA_CHECK(cudaGetLastError());
 
         /* Opcijsko beleženje energije. Pri benchmark meritvah naj bo log_steps=0. */
-        if (log_steps) {
+        if (log_steps)
+        {
             out.final_potential = reduce_device_sum(d_pe_terms, d_tmp1, d_tmp2, pe_count);
             out.final_kinetic = compute_ke_gpu(d_vx, d_vy, d_ke_terms, d_tmp1, d_tmp2, n);
             out.final_total = out.final_kinetic + out.final_potential;
@@ -955,7 +1096,8 @@ SimulationResult run_simulation(Particle *particles,
         }
 
 #if GENERATE_GIF
-        if (gif && FRAME_EVERY > 0 && (step + 1) % FRAME_EVERY == 0) {
+        if (gif && FRAME_EVERY > 0 && (step + 1) % FRAME_EVERY == 0)
+        {
             unpack_particles_kernel<<<vector_blocks, VECTOR_THREADS>>>(d_particles, d_x, d_y, d_vx, d_vy, d_fx, d_fy, n);
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaMemcpy(particles, d_particles, particle_bytes, cudaMemcpyDeviceToHost));
@@ -966,7 +1108,8 @@ SimulationResult run_simulation(Particle *particles,
     }
 
     /* Če energije nismo beležili v vsakem koraku, jo na koncu izračunamo samo enkrat. */
-    if (!log_steps && nsteps > 0) {
+    if (!log_steps && nsteps > 0)
+    {
         out.final_potential = reduce_device_sum(d_pe_terms, d_tmp1, d_tmp2, pe_count);
         out.final_kinetic = compute_ke_gpu(d_vx, d_vy, d_ke_terms, d_tmp1, d_tmp2, n);
         out.final_total = out.final_kinetic + out.final_potential;
@@ -982,7 +1125,8 @@ SimulationResult run_simulation(Particle *particles,
     CUDA_CHECK(cudaDeviceSynchronize());
 
 #if GENERATE_GIF
-    if (gif) {
+    if (gif)
+    {
         ge_close_gif(gif);
     }
 #endif
@@ -998,9 +1142,12 @@ SimulationResult run_simulation(Particle *particles,
     CUDA_CHECK(cudaFree(d_ke_terms));
     CUDA_CHECK(cudaFree(d_tmp1));
     CUDA_CHECK(cudaFree(d_tmp2));
-    if (d_cell_counts) CUDA_CHECK(cudaFree(d_cell_counts));
-    if (d_cell_particles) CUDA_CHECK(cudaFree(d_cell_particles));
-    if (d_overflow) CUDA_CHECK(cudaFree(d_overflow));
+    if (d_cell_counts)
+        CUDA_CHECK(cudaFree(d_cell_counts));
+    if (d_cell_particles)
+        CUDA_CHECK(cudaFree(d_cell_particles));
+    if (d_overflow)
+        CUDA_CHECK(cudaFree(d_overflow));
 
     return out;
 }
