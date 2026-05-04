@@ -259,22 +259,25 @@ double compute_forces(Particle *particles, unsigned int n, double box_size)
                     fix += fij_x;
                     fiy += fij_y;
 
-                    // Delec j: več niti lahko hkrati piše sem → omp atomic (analog atomicAdd)
-                    // Vsaka atomic operacija zaklene pomnilniško lokacijo za ostala jedra.
-                    // Pri gostih sistemih je to ozko grlo.
+                    // Delec j: več niti hkrati piše sem → atomic (analog GPU atomicAdd).
+                    // Na CPU je #pragma omp atomic cache-line lock (~20-50 ns).
+                    // Z 64 nitmi in cell listom je konfliktov malo → overhead majhen.
 #pragma omp atomic
                     particles[j].fx -= fij_x;
 #pragma omp atomic
                     particles[j].fy -= fij_y;
 
-                    // Par je štet enkrat (ne 0.5 faktor kot v lennard-jones-optimized.cu)
+                    // Par je štet enkrat (Newton: ne potrebujemo 0.5 faktorja)
                     pe += 4.0 * EPSILON * (sr12 - sr6) - v_shift;
                 }
             }
         }
 
-        // Delec i posodablja samo ta nit → navaden vpis, brez atomic
+        // Delec i: tudi tukaj atomic, ker druge niti pišejo v particles[i].fx
+        // prek svojih j>k zank (kjer je i njihov j). Brez atomic → race condition.
+#pragma omp atomic
         particles[i].fx += fix;
+#pragma omp atomic
         particles[i].fy += fiy;
     }
 
