@@ -16,9 +16,9 @@ make
 # ==========================================
 # NASTAVITVE MERITEV
 # ==========================================
-PROGRAM_NAME="lj_cpu_optimized"
+PROGRAM_NAME="lj_cpu_optimized1_newton"
 RUNS=5
-N=8000
+N=1000
 NSTEPS=5000
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
