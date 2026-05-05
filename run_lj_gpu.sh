@@ -18,9 +18,9 @@ make
 # ==========================================
 # NASTAVITVE MERITEV
 # ==========================================
-PROGRAM_NAME="gpu-basic"
+PROGRAM_NAME="test_gpu"
 RUNS=5
-N=4000
+N=2000
 NSTEPS=5000
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK

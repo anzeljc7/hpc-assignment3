@@ -126,16 +126,20 @@ double random_double(void)
     return (double)rand() / (double)RAND_MAX;
 }
 
-/* Javna CPE funkcija za kinetično energijo. Ohranimo jo zaradi združljivosti z originalnim vmesnikom. */
+/* Ni uporabljena v GPU poti — run_simulation uporablja compute_ke_gpu(). */
 double compute_ke(const Particle *particles, unsigned int n)
 {
-    double ke = 0.0;
-    for (unsigned int i = 0; i < n; ++i)
-    {
-        const Particle *p = &particles[i];
-        ke += 0.5 * (p->vx * p->vx + p->vy * p->vy);
-    }
-    return ke;
+    (void)particles;
+    (void)n;
+    return 0.0;
+}
+
+/* Ni uporabljena v GPU poti — integrate_first_kernel zavija pozicije inline. */
+void wrap_positions(Particle *particles, unsigned int n, double box_size)
+{
+    (void)particles;
+    (void)n;
+    (void)box_size;
 }
 
 /*
@@ -200,22 +204,6 @@ int initialize_particles(Particle *particles, unsigned int n, double box_size,
     return 1;
 }
 
-void wrap_positions(Particle *particles, unsigned int n, double box_size)
-{
-    for (unsigned int i = 0; i < n; ++i)
-    {
-        Particle *p = &particles[i];
-        double wx = fmod(p->x, box_size);
-        double wy = fmod(p->y, box_size);
-        if (wx < 0.0)
-            wx += box_size;
-        if (wy < 0.0)
-            wy += box_size;
-        p->x = wx;
-        p->y = wy;
-    }
-}
-
 /* Premaknjen Lennard-Jones potencial pri radiju odreza. */
 static __host__ __device__ inline double lj_v_shift(void)
 {
@@ -231,88 +219,22 @@ double compute_v_shift(void)
     return lj_v_shift();
 }
 
-/*
- * Referenčni oziroma fallback izračun sil na CPE.
- * Tudi ta uporablja Newtonov 3. zakon: vsak par i<j izračunamo enkrat, nato pa
- * delcu j dodamo nasprotno silo. Funkcija se ne uporablja v run_simulation,
- * vendar jo ohranimo zaradi združljivosti z originalnim vmesnikom in za preverjanje.
- */
+/* Ni uporabljena v GPU poti — run_simulation uporablja compute_forces_gpu(). */
 double compute_forces(Particle *particles, unsigned int n, double box_size)
 {
-    for (unsigned int i = 0; i < n; ++i)
-    {
-        particles[i].fx = 0.0;
-        particles[i].fy = 0.0;
-    }
-
-    const double half_box = 0.5 * box_size;
-    const double rcut2 = R_CUT * R_CUT;
-    const double v_shift = compute_v_shift();
-    double pe = 0.0;
-
-    for (unsigned int i = 0; i < n; ++i)
-    {
-        for (unsigned int j = i + 1; j < n; ++j)
-        {
-            double dx = particles[i].x - particles[j].x;
-            double dy = particles[i].y - particles[j].y;
-
-            if (dx > half_box)
-                dx -= box_size;
-            else if (dx < -half_box)
-                dx += box_size;
-            if (dy > half_box)
-                dy -= box_size;
-            else if (dy < -half_box)
-                dy += box_size;
-
-            double r2 = dx * dx + dy * dy;
-            if (r2 < rcut2 && r2 > 0.0)
-            {
-                double inv_r2 = 1.0 / r2;
-                double sr2 = (SIGMA * SIGMA) * inv_r2;
-                double sr6 = sr2 * sr2 * sr2;
-                double sr12 = sr6 * sr6;
-                double f_over_r = 24.0 * EPSILON * (2.0 * sr12 - sr6) * inv_r2;
-                double fij_x = f_over_r * dx;
-                double fij_y = f_over_r * dy;
-
-                particles[i].fx += fij_x;
-                particles[i].fy += fij_y;
-                particles[j].fx -= fij_x;
-                particles[j].fy -= fij_y;
-
-                pe += 4.0 * EPSILON * (sr12 - sr6) - v_shift;
-            }
-        }
-    }
-
-    return pe;
+    (void)particles;
+    (void)n;
+    (void)box_size;
+    return 0.0;
 }
 
-/* CPE fallback za Leapfrog korak. Spodnja CUDA pot uporablja enakovredne GPE kernele. */
+/* Ni uporabljena v GPU poti — run_simulation uporablja integrate_first/second_kernel. */
 double leapfrog_step(Particle *particles, unsigned int n, double box_size)
 {
-    for (unsigned int i = 0; i < n; ++i)
-    {
-        Particle *p = &particles[i];
-        p->vx += 0.5 * DT * p->fx;
-        p->vy += 0.5 * DT * p->fy;
-        p->x += DT * p->vx;
-        p->y += DT * p->vy;
-    }
-
-    wrap_positions(particles, n, box_size);
-    double pe = compute_forces(particles, n, box_size);
-
-    for (unsigned int i = 0; i < n; ++i)
-    {
-        Particle *p = &particles[i];
-        p->vx += 0.5 * DT * p->fx;
-        p->vy += 0.5 * DT * p->fy;
-    }
-
-    return pe;
+    (void)particles;
+    (void)n;
+    (void)box_size;
+    return 0.0;
 }
 
 // -----------------------------------------------------------------------------

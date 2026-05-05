@@ -59,14 +59,10 @@ double random_double(void) {
     return (double)rand() / (double)RAND_MAX;
 }
 
-// CPU helper; kept for compatibility with the original interface.
+/* Ni uporabljena v GPU poti — run_simulation uporablja compute_ke_gpu(). */
 double compute_ke(const Particle *particles, unsigned int n) {
-    double ke = 0.0;
-    for (unsigned int i = 0; i < n; ++i) {
-        const Particle *p = &particles[i];
-        ke += 0.5 * (p->vx * p->vx + p->vy * p->vy);
-    }
-    return ke;
+    (void)particles; (void)n;
+    return 0.0;
 }
 
 int initialize_particles(Particle *particles, unsigned int n, double box_size,
@@ -121,16 +117,9 @@ int initialize_particles(Particle *particles, unsigned int n, double box_size,
     return 1;
 }
 
+/* Ni uporabljena v GPU poti — integrate_first_kernel zavija pozicije inline. */
 void wrap_positions(Particle *particles, unsigned int n, double box_size) {
-    for (unsigned int i = 0; i < n; ++i) {
-        Particle *p = &particles[i];
-        double wx = fmod(p->x, box_size);
-        double wy = fmod(p->y, box_size);
-        if (wx < 0.0) wx += box_size;
-        if (wy < 0.0) wy += box_size;
-        p->x = wx;
-        p->y = wy;
-    }
+    (void)particles; (void)n; (void)box_size;
 }
 
 static __host__ __device__ inline double lj_v_shift(void) {
@@ -145,65 +134,16 @@ double compute_v_shift(void) {
     return lj_v_shift();
 }
 
-// CPU fallback; useful for correctness checks and compatibility.
+/* Ni uporabljena v GPU poti — run_simulation uporablja compute_forces_kernel(). */
 double compute_forces(Particle *particles, unsigned int n, double box_size) {
-    for (unsigned int i = 0; i < n; ++i) {
-        particles[i].fx = 0.0;
-        particles[i].fy = 0.0;
-    }
-
-    const double rcut2 = R_CUT * R_CUT;
-    const double v_shift = compute_v_shift();
-    double pe = 0.0;
-
-    for (unsigned int i = 0; i < n; ++i) {
-        Particle *pi = &particles[i];
-        for (unsigned int j = 0; j < n; ++j) {
-            if (i == j) continue;
-            Particle *pj = &particles[j];
-
-            double dx = pi->x - pj->x;
-            double dy = pi->y - pj->y;
-            dx -= box_size * nearbyint(dx / box_size);
-            dy -= box_size * nearbyint(dy / box_size);
-
-            double r2 = dx * dx + dy * dy;
-            if (r2 >= rcut2 || r2 == 0.0) continue;
-
-            double inv_r2 = 1.0 / r2;
-            double sr2 = (SIGMA * SIGMA) * inv_r2;
-            double sr6 = sr2 * sr2 * sr2;
-            double sr12 = sr6 * sr6;
-            double f_over_r = 24.0 * EPSILON * (2.0 * sr12 - sr6) * inv_r2;
-
-            pi->fx += f_over_r * dx;
-            pi->fy += f_over_r * dy;
-            pe += 0.5 * (4.0 * EPSILON * (sr12 - sr6) - v_shift);
-        }
-    }
-
-    return pe;
+    (void)particles; (void)n; (void)box_size;
+    return 0.0;
 }
 
+/* Ni uporabljena v GPU poti — run_simulation uporablja integrate_first/second_kernel. */
 double leapfrog_step(Particle *particles, unsigned int n, double box_size) {
-    for (unsigned int i = 0; i < n; ++i) {
-        Particle *p = &particles[i];
-        p->vx += 0.5 * DT * p->fx;
-        p->vy += 0.5 * DT * p->fy;
-        p->x += DT * p->vx;
-        p->y += DT * p->vy;
-    }
-
-    wrap_positions(particles, n, box_size);
-    double pe = compute_forces(particles, n, box_size);
-
-    for (unsigned int i = 0; i < n; ++i) {
-        Particle *p = &particles[i];
-        p->vx += 0.5 * DT * p->fx;
-        p->vy += 0.5 * DT * p->fy;
-    }
-
-    return pe;
+    (void)particles; (void)n; (void)box_size;
+    return 0.0;
 }
 
 __global__ void pack_particles_kernel(const Particle *__restrict__ p,
