@@ -44,16 +44,16 @@
 #define CHECK_CELL_OVERFLOW 0
 #endif
 
-#define CUDA_CHECK(call)                                                         \
-    do                                                                           \
-    {                                                                            \
-        cudaError_t _err = (call);                                               \
-        if (_err != cudaSuccess)                                                 \
-        {                                                                        \
-            fprintf(stderr, "CUDA error %s:%d: %s\n", __FILE__, __LINE__,       \
-                    cudaGetErrorString(_err));                                   \
-            exit(EXIT_FAILURE);                                                  \
-        }                                                                        \
+#define CUDA_CHECK(call)                                                  \
+    do                                                                    \
+    {                                                                     \
+        cudaError_t _err = (call);                                        \
+        if (_err != cudaSuccess)                                          \
+        {                                                                 \
+            fprintf(stderr, "CUDA error %s:%d: %s\n", __FILE__, __LINE__, \
+                    cudaGetErrorString(_err));                            \
+            exit(EXIT_FAILURE);                                           \
+        }                                                                 \
     } while (0)
 
 #if GENERATE_GIF
@@ -168,8 +168,10 @@ void wrap_positions(Particle *particles, unsigned int n, double box_size)
         Particle *p = &particles[i];
         double wx = fmod(p->x, box_size);
         double wy = fmod(p->y, box_size);
-        if (wx < 0.0) wx += box_size;
-        if (wy < 0.0) wy += box_size;
+        if (wx < 0.0)
+            wx += box_size;
+        if (wy < 0.0)
+            wy += box_size;
         p->x = wx;
         p->y = wy;
     }
@@ -209,10 +211,14 @@ double compute_forces(Particle *particles, unsigned int n, double box_size)
             double dx = particles[i].x - particles[j].x;
             double dy = particles[i].y - particles[j].y;
 
-            if (dx > half_box) dx -= box_size;
-            else if (dx < -half_box) dx += box_size;
-            if (dy > half_box) dy -= box_size;
-            else if (dy < -half_box) dy += box_size;
+            if (dx > half_box)
+                dx -= box_size;
+            else if (dx < -half_box)
+                dx += box_size;
+            if (dy > half_box)
+                dy -= box_size;
+            else if (dy < -half_box)
+                dy += box_size;
 
             double r2 = dx * dx + dy * dy;
             if (r2 < rcut2 && r2 > 0.0)
@@ -268,8 +274,10 @@ double leapfrog_step(Particle *particles, unsigned int n, double box_size)
 
 static __device__ __forceinline__ int wrap_cell(int c, int nc)
 {
-    if (c < 0) return c + nc;
-    if (c >= nc) return c - nc;
+    if (c < 0)
+        return c + nc;
+    if (c >= nc)
+        return c - nc;
     return c;
 }
 
@@ -283,7 +291,8 @@ __global__ void pack_particles_kernel(const Particle *__restrict__ p,
                                       unsigned int n)
 {
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
     x[i] = p[i].x;
     y[i] = p[i].y;
     vx[i] = p[i].vx;
@@ -302,7 +311,8 @@ __global__ void unpack_particles_kernel(Particle *__restrict__ p,
                                         unsigned int n)
 {
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
     p[i].x = x[i];
     p[i].y = y[i];
     p[i].vx = vx[i];
@@ -321,17 +331,22 @@ __global__ void integrate_first_kernel(double *__restrict__ x,
                                        double box_size)
 {
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
 
     double vxi = vx[i] + 0.5 * DT * fx[i];
     double vyi = vy[i] + 0.5 * DT * fy[i];
     double xi = x[i] + DT * vxi;
     double yi = y[i] + DT * vyi;
 
-    if (xi >= box_size) xi -= box_size;
-    else if (xi < 0.0) xi += box_size;
-    if (yi >= box_size) yi -= box_size;
-    else if (yi < 0.0) yi += box_size;
+    if (xi >= box_size)
+        xi -= box_size;
+    else if (xi < 0.0)
+        xi += box_size;
+    if (yi >= box_size)
+        yi -= box_size;
+    else if (yi < 0.0)
+        yi += box_size;
 
     x[i] = xi;
     y[i] = yi;
@@ -346,7 +361,8 @@ __global__ void integrate_second_kernel(double *__restrict__ vx,
                                         unsigned int n)
 {
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
     vx[i] += 0.5 * DT * fx[i];
     vy[i] += 0.5 * DT * fy[i];
 }
@@ -356,7 +372,8 @@ __global__ void clear_forces_kernel(double *__restrict__ fx,
                                     unsigned int n)
 {
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
     fx[i] = 0.0;
     fy[i] = 0.0;
 }
@@ -364,7 +381,8 @@ __global__ void clear_forces_kernel(double *__restrict__ fx,
 __global__ void clear_double_kernel(double *__restrict__ values, unsigned int n)
 {
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
     values[i] = 0.0;
 }
 
@@ -373,8 +391,10 @@ __global__ void clear_cells_kernel(int *__restrict__ cell_counts,
                                    int total_cells)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < total_cells) cell_counts[i] = 0;
-    if (i == 0) *overflow = 0;
+    if (i < total_cells)
+        cell_counts[i] = 0;
+    if (i == 0)
+        *overflow = 0;
 }
 
 __global__ void build_cells_kernel(const double *__restrict__ x,
@@ -387,15 +407,20 @@ __global__ void build_cells_kernel(const double *__restrict__ x,
                                    double cell_size)
 {
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
 
     int cx = (int)(x[i] / cell_size);
     int cy = (int)(y[i] / cell_size);
 
-    if (cx < 0) cx = 0;
-    if (cy < 0) cy = 0;
-    if (cx >= nc) cx = nc - 1;
-    if (cy >= nc) cy = nc - 1;
+    if (cx < 0)
+        cx = 0;
+    if (cy < 0)
+        cy = 0;
+    if (cx >= nc)
+        cx = nc - 1;
+    if (cy >= nc)
+        cy = nc - 1;
 
     int cell = cy * nc + cx;
     int slot = atomicAdd(&cell_counts[cell], 1);
@@ -428,7 +453,8 @@ __global__ void compute_forces_cell_kernel(const double *__restrict__ x,
                                            double cell_size)
 {
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
 
     const double xi = x[i];
     const double yi = y[i];
@@ -440,10 +466,14 @@ __global__ void compute_forces_cell_kernel(const double *__restrict__ x,
 
     int cx_i = (int)(xi / cell_size);
     int cy_i = (int)(yi / cell_size);
-    if (cx_i < 0) cx_i = 0;
-    if (cy_i < 0) cy_i = 0;
-    if (cx_i >= nc) cx_i = nc - 1;
-    if (cy_i >= nc) cy_i = nc - 1;
+    if (cx_i < 0)
+        cx_i = 0;
+    if (cy_i < 0)
+        cy_i = 0;
+    if (cx_i >= nc)
+        cx_i = nc - 1;
+    if (cy_i >= nc)
+        cy_i = nc - 1;
 
     for (int dcy = -1; dcy <= 1; dcy++)
     {
@@ -454,20 +484,26 @@ __global__ void compute_forces_cell_kernel(const double *__restrict__ x,
             int cell_j = cy_j * nc + cx_j;
 
             int count = cell_counts[cell_j];
-            if (count > MAX_PARTICLES_PER_CELL) count = MAX_PARTICLES_PER_CELL;
+            if (count > MAX_PARTICLES_PER_CELL)
+                count = MAX_PARTICLES_PER_CELL;
 
             for (int k = 0; k < count; k++)
             {
                 int j = cell_particles[cell_j * MAX_PARTICLES_PER_CELL + k];
-                if ((unsigned int)j == i) continue;
+                if ((unsigned int)j == i)
+                    continue;
 
                 double dx = xi - x[j];
                 double dy = yi - y[j];
 
-                if (dx > half_box) dx -= box_size;
-                else if (dx < -half_box) dx += box_size;
-                if (dy > half_box) dy -= box_size;
-                else if (dy < -half_box) dy += box_size;
+                if (dx > half_box)
+                    dx -= box_size;
+                else if (dx < -half_box)
+                    dx += box_size;
+                if (dy > half_box)
+                    dy -= box_size;
+                else if (dy < -half_box)
+                    dy += box_size;
 
                 double r2 = dx * dx + dy * dy;
                 if (r2 < rcut2 && r2 > 0.0)
@@ -503,7 +539,8 @@ __global__ void compute_forces_allpairs_kernel(const double *__restrict__ x,
                                                double box_size)
 {
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
 
     const double xi = x[i];
     const double yi = y[i];
@@ -515,15 +552,20 @@ __global__ void compute_forces_allpairs_kernel(const double *__restrict__ x,
 
     for (unsigned int j = 0; j < n; j++)
     {
-        if (j == i) continue;
+        if (j == i)
+            continue;
 
         double dx = xi - x[j];
         double dy = yi - y[j];
 
-        if (dx > half_box) dx -= box_size;
-        else if (dx < -half_box) dx += box_size;
-        if (dy > half_box) dy -= box_size;
-        else if (dy < -half_box) dy += box_size;
+        if (dx > half_box)
+            dx -= box_size;
+        else if (dx < -half_box)
+            dx += box_size;
+        if (dy > half_box)
+            dy -= box_size;
+        else if (dy < -half_box)
+            dy += box_size;
 
         double r2 = dx * dx + dy * dy;
         if (r2 < rcut2 && r2 > 0.0)
@@ -550,7 +592,8 @@ __global__ void kinetic_terms_kernel(const double *__restrict__ vx,
                                      unsigned int n)
 {
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n) return;
+    if (i >= n)
+        return;
     terms[i] = 0.5 * (vx[i] * vx[i] + vy[i] * vy[i]);
 }
 
@@ -564,8 +607,10 @@ __global__ void reduce_sum_kernel(const double *__restrict__ in,
     extern __shared__ double sdata[];
     double sum = 0.0;
 
-    if (i < n) sum += in[i];
-    if (i + blockDim.x < n) sum += in[i + blockDim.x];
+    if (i < n)
+        sum += in[i];
+    if (i + blockDim.x < n)
+        sum += in[i + blockDim.x];
 
     sdata[tid] = sum;
     __syncthreads();
@@ -586,7 +631,8 @@ static double reduce_device_sum(const double *d_values,
                                 double *d_tmp2,
                                 unsigned int n)
 {
-    if (n == 0) return 0.0;
+    if (n == 0)
+        return 0.0;
 
     const double *in = d_values;
     double *out = d_tmp1;
@@ -712,7 +758,8 @@ SimulationResult run_simulation(Particle *particles,
     const unsigned int vector_blocks = (n + VECTOR_THREADS - 1) / VECTOR_THREADS;
 
     int nc = (int)(box_size / R_CUT);
-    if (nc < 1) nc = 1;
+    if (nc < 1)
+        nc = 1;
     double cell_size = box_size / (double)nc;
     int total_cells = nc * nc;
     int use_cells = (nc >= 3);
@@ -834,9 +881,12 @@ SimulationResult run_simulation(Particle *particles,
     CUDA_CHECK(cudaFree(d_ke_terms));
     CUDA_CHECK(cudaFree(d_tmp1));
     CUDA_CHECK(cudaFree(d_tmp2));
-    if (d_cell_counts) CUDA_CHECK(cudaFree(d_cell_counts));
-    if (d_cell_particles) CUDA_CHECK(cudaFree(d_cell_particles));
-    if (d_overflow) CUDA_CHECK(cudaFree(d_overflow));
+    if (d_cell_counts)
+        CUDA_CHECK(cudaFree(d_cell_counts));
+    if (d_cell_particles)
+        CUDA_CHECK(cudaFree(d_cell_particles));
+    if (d_overflow)
+        CUDA_CHECK(cudaFree(d_overflow));
 
     return out;
 }
