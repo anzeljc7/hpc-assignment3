@@ -10,39 +10,65 @@
 #include "lennard-jones.h"
 
 /*
- * CUDA implementacija Lennard-Jones simulacije s cell-list optimizacijo.
+ * CUDA implementacija Lennard-Jones simulacije z dvema glavnima optimizacijama:
  *
- * Cell-list oziroma linked-cell optimizacija:
- *    Simulacijski prostor razdelimo na kvadratne celice s stranico >= R_CUT.
- *    Vsaka CUDA nit obdela en delec i in pregleda samo 3x3 = 9 sosednjih
- *    celic namesto vseh N delcev. Tako se izognemo preverjanju vseh N^2 parov.
+ * 1) Cell-list oziroma linked-cell optimizacija
+ *    Simulacijski prostor razdelimo na kvadratne celice. Velikost celice je
+ *    izbrana tako, da je vsaj R_CUT. Ker so Lennard-Jones interakcije zunaj
+ *    radija R_CUT enake nič, mora delec preverjati samo delce v svoji celici
+ *    in v sosednjih celicah. Tako se izognemo preverjanju vseh N*N parov.
  *
- * Vsaka nit akumulira silo delca i v lokalnih spremenljivkah in jo ob koncu
- * zapiše samo v fx[i]/fy[i]. Ker nobena nit ne piše v tuje delce, ne
- * potrebujemo atomicAdd. Ker vsak par (i,j) obiščemo dvakrat (enkrat za i,
- * enkrat za j), upoštevamo faktor 0.5 pri potencialni energiji.
+ * 2) Newtonov 3. zakon
+ *    Interakcijo para (i, j) izračunamo samo enkrat. Sila, ki jo dodamo delcu i,
+ *    je nasprotna sili, ki jo dodamo delcu j:
+ *        F_ij = -F_ji
+ *    Na GPE moramo zato pri zapisovanju sil uporabiti atomicAdd, saj lahko več
+ *    CUDA niti hkrati posodablja silo istega delca.
  *
- * V primerjavi z gpu-timotej2-cuda-newton-cell.cu:
- *    - Ni atomicAdd pri silah -> enostavnejši dostopi do pomnilnika
- *    - Vsak par obravnavan dvakrat (Newton bi prepolovil delo, a zahteva atomics)
- *    - Enostavnejša struktura: en blok delcev, ni para celic
+ * Opomba glede hitrosti:
+ *    Ta različica je algoritmično bolj napredna, vendar so atomicAdd operacije
+ *    lahko drage. Zato jo je smiselno primerjati tudi s preprostejšo različico,
+ *    kjer en blok računa silo enega delca. Pri redkejših sistemih oziroma večjih
+ *    N pa cell-list praviloma precej zmanjša število obravnavanih parov.
  */
 
 #ifndef VECTOR_THREADS
 #define VECTOR_THREADS 32
 #endif
 
+/* Uporablja se pri splošnih redukcijah, računanju kinetične energije in pack/unpack kernelih. */
 #ifndef REDUCE_THREADS
 #define REDUCE_THREADS 32
 #endif
 
+/*
+ * Število niti na blok pri kernelu za izračun sil med pari celic.
+ * En CUDA blok obdela en par celic. Niti znotraj bloka si razdelijo delo nad
+ * pari delcev, nato pa z redukcijo seštejejo samo prispevek potencialne energije.
+ */
+#ifndef PAIR_THREADS
+#define PAIR_THREADS 32
+#endif
+
+/*
+ * Največje število delcev, ki jih hranimo v eni celici.
+ * Pri pričakovani gostoti in velikosti celice okrog R_CUT bi morala biti ta
+ * vrednost več kot dovolj. Če se pojavi opozorilo o overflowu celice, jo povečaj.
+ */
 #ifndef MAX_PARTICLES_PER_CELL
 #define MAX_PARTICLES_PER_CELL 64
 #endif
 
+/*
+ * Če je nastavljeno na 1, se po gradnji cell-list strukture iz GPE na CPE
+ * prekopira en celoštevilski overflow flag. To je uporabno za razhroščevanje,
+ * vendar pri vsakem izračunu sil doda majhen prenos, zato naj bo pri meritvah 0.
+ */
 #ifndef CHECK_CELL_OVERFLOW
 #define CHECK_CELL_OVERFLOW 0
 #endif
+
+#define CELL_PAIR_TYPES 5
 
 #define CUDA_CHECK(call)                                                  \
     do                                                                    \
@@ -62,7 +88,9 @@ uint8_t palette[] = {0, 0, 0, 255, 255, 0};
 void set_pixel(uint8_t *img, int w, int h, int x, int y, uint8_t index)
 {
     if (x < 0 || y < 0 || x >= w || y >= h)
+    {
         return;
+    }
     img[(size_t)y * (size_t)w + (size_t)x] = index;
 }
 
@@ -79,7 +107,9 @@ void render_frame_gif(ge_GIF *gif, const Particle *particles, unsigned int n, do
             for (int dx = -FRAME_PARTICLE_RADIUS; dx <= FRAME_PARTICLE_RADIUS; ++dx)
             {
                 if (dx * dx + dy * dy <= FRAME_PARTICLE_RADIUS * FRAME_PARTICLE_RADIUS)
+                {
                     set_pixel(gif->frame, FRAME_WIDTH, FRAME_HEIGHT, px + dx, py + dy, 1);
+                }
             }
         }
     }
@@ -90,11 +120,13 @@ void render_frame_gif(ge_GIF *gif, const Particle *particles, unsigned int n, do
 // Pomožne funkcije za CPE in združljivost z osnovno kodo
 // -----------------------------------------------------------------------------
 
+/* Enaka pomožna funkcija za naključna števila kot v osnovni kodi. Uporablja se samo pri inicializaciji. */
 double random_double(void)
 {
     return (double)rand() / (double)RAND_MAX;
 }
 
+/* Javna CPE funkcija za kinetično energijo. Ohranimo jo zaradi združljivosti z originalnim vmesnikom. */
 double compute_ke(const Particle *particles, unsigned int n)
 {
     double ke = 0.0;
@@ -106,6 +138,11 @@ double compute_ke(const Particle *particles, unsigned int n)
     return ke;
 }
 
+/*
+ * Inicializacija ostane na CPE, ker se izvede samo enkrat in ni ozko grlo.
+ * Delce postavimo na mrežo, jim določimo naključne hitrosti, odstranimo povprečno
+ * hitrost sistema in hitrosti skaliramo na zahtevano temperaturo.
+ */
 int initialize_particles(Particle *particles, unsigned int n, double box_size,
                          double placement_fraction, unsigned int seed,
                          double temperature)
@@ -149,7 +186,9 @@ int initialize_particles(Particle *particles, unsigned int n, double box_size,
 
     double current_temperature = ke / (double)n;
     if (current_temperature <= 0.0)
+    {
         return 0;
+    }
 
     double scale = sqrt(temperature / current_temperature);
     for (unsigned int k = 0; k < n; ++k)
@@ -177,6 +216,7 @@ void wrap_positions(Particle *particles, unsigned int n, double box_size)
     }
 }
 
+/* Premaknjen Lennard-Jones potencial pri radiju odreza. */
 static __host__ __device__ inline double lj_v_shift(void)
 {
     const double sr = SIGMA / R_CUT;
@@ -191,6 +231,12 @@ double compute_v_shift(void)
     return lj_v_shift();
 }
 
+/*
+ * Referenčni oziroma fallback izračun sil na CPE.
+ * Tudi ta uporablja Newtonov 3. zakon: vsak par i<j izračunamo enkrat, nato pa
+ * delcu j dodamo nasprotno silo. Funkcija se ne uporablja v run_simulation,
+ * vendar jo ohranimo zaradi združljivosti z originalnim vmesnikom in za preverjanje.
+ */
 double compute_forces(Particle *particles, unsigned int n, double box_size)
 {
     for (unsigned int i = 0; i < n; ++i)
@@ -244,6 +290,7 @@ double compute_forces(Particle *particles, unsigned int n, double box_size)
     return pe;
 }
 
+/* CPE fallback za Leapfrog korak. Spodnja CUDA pot uporablja enakovredne GPE kernele. */
 double leapfrog_step(Particle *particles, unsigned int n, double box_size)
 {
     for (unsigned int i = 0; i < n; ++i)
@@ -272,6 +319,7 @@ double leapfrog_step(Particle *particles, unsigned int n, double box_size)
 // CUDA pomožne funkcije in kerneli
 // -----------------------------------------------------------------------------
 
+/* Periodično zavije indeks celice v interval [0, nc). */
 static __device__ __forceinline__ int wrap_cell(int c, int nc)
 {
     if (c < 0)
@@ -281,6 +329,11 @@ static __device__ __forceinline__ int wrap_cell(int c, int nc)
     return c;
 }
 
+/*
+ * Pretvori tabelo struktur Particle (AoS) v ločene tabele (SoA).
+ * CPE/main uporablja strukture Particle, CUDA kerneli pa hitreje delajo z
+ * ločenimi tabelami, ker sosednje niti berejo sosednje vrednosti x/y/v.
+ */
 __global__ void pack_particles_kernel(const Particle *__restrict__ p,
                                       double *__restrict__ x,
                                       double *__restrict__ y,
@@ -301,6 +354,7 @@ __global__ void pack_particles_kernel(const Particle *__restrict__ p,
     fy[i] = p[i].fy;
 }
 
+/* Pretvori SoA tabele nazaj v strukture Particle za končni rezultat oziroma GIF. */
 __global__ void unpack_particles_kernel(Particle *__restrict__ p,
                                         const double *__restrict__ x,
                                         const double *__restrict__ y,
@@ -321,6 +375,12 @@ __global__ void unpack_particles_kernel(Particle *__restrict__ p,
     p[i].fy = fy[i];
 }
 
+/*
+ * Prva polovica Leapfrog koraka:
+ *   v(t + dt/2) = v(t) + 0.5 * F(t) * dt
+ *   x(t + dt)   = x(t) + v(t + dt/2) * dt
+ * Ena CUDA nit posodobi en delec.
+ */
 __global__ void integrate_first_kernel(double *__restrict__ x,
                                        double *__restrict__ y,
                                        double *__restrict__ vx,
@@ -339,6 +399,7 @@ __global__ void integrate_first_kernel(double *__restrict__ x,
     double xi = x[i] + DT * vxi;
     double yi = y[i] + DT * vyi;
 
+    /* Periodični robni pogoji. Ker je DT majhen, je običajno dovolj en premik čez rob. */
     if (xi >= box_size)
         xi -= box_size;
     else if (xi < 0.0)
@@ -354,6 +415,7 @@ __global__ void integrate_first_kernel(double *__restrict__ x,
     vy[i] = vyi;
 }
 
+/* Druga polovica Leapfrog koraka: v(t + dt) = v(t + dt/2) + 0.5 * F(t + dt) * dt. */
 __global__ void integrate_second_kernel(double *__restrict__ vx,
                                         double *__restrict__ vy,
                                         const double *__restrict__ fx,
@@ -363,10 +425,12 @@ __global__ void integrate_second_kernel(double *__restrict__ vx,
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n)
         return;
+
     vx[i] += 0.5 * DT * fx[i];
     vy[i] += 0.5 * DT * fy[i];
 }
 
+/* Pred izračunom novih sil ponastavi tabele sil. */
 __global__ void clear_forces_kernel(double *__restrict__ fx,
                                     double *__restrict__ fy,
                                     unsigned int n)
@@ -378,7 +442,9 @@ __global__ void clear_forces_kernel(double *__restrict__ fx,
     fy[i] = 0.0;
 }
 
-__global__ void clear_double_kernel(double *__restrict__ values, unsigned int n)
+/* Ponastavi splošno tabelo double vrednosti; uporablja se za člene potencialne energije. */
+__global__ void clear_double_kernel(double *__restrict__ values,
+                                    unsigned int n)
 {
     unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n)
@@ -386,6 +452,7 @@ __global__ void clear_double_kernel(double *__restrict__ values, unsigned int n)
     values[i] = 0.0;
 }
 
+/* Pred ponovno gradnjo cell-list strukture ponastavi število delcev v vsaki celici. */
 __global__ void clear_cells_kernel(int *__restrict__ cell_counts,
                                    int *__restrict__ overflow,
                                    int total_cells)
@@ -397,6 +464,11 @@ __global__ void clear_cells_kernel(int *__restrict__ cell_counts,
         *overflow = 0;
 }
 
+/*
+ * Zgradi cell-list strukturo.
+ * Vsak delec izračuna, v katero celico spada, in v to celico z atomicAdd doda
+ * svoj indeks. Strukturo obnovimo v vsakem simulacijskem koraku, ker se delci premikajo.
+ */
 __global__ void build_cells_kernel(const double *__restrict__ x,
                                    const double *__restrict__ y,
                                    int *__restrict__ cell_counts,
@@ -413,6 +485,7 @@ __global__ void build_cells_kernel(const double *__restrict__ x,
     int cx = (int)(x[i] / cell_size);
     int cy = (int)(y[i] / cell_size);
 
+    /* Numerična varnost za koordinate, ki so zelo blizu box_size. */
     if (cx < 0)
         cx = 0;
     if (cy < 0)
@@ -426,75 +499,125 @@ __global__ void build_cells_kernel(const double *__restrict__ x,
     int slot = atomicAdd(&cell_counts[cell], 1);
 
     if (slot < MAX_PARTICLES_PER_CELL)
+    {
         cell_particles[cell * MAX_PARTICLES_PER_CELL + slot] = (int)i;
+    }
     else
+    {
         atomicExch(overflow, 1);
+    }
 }
 
 /*
- * Kernel za izračun sil s cell-list strukturo brez Newtonovega 3. zakona.
+ * Za podano celico in tip para vrne drugo celico v paru.
+ * Uporabimo pet tipov parov, ker pri nc >= 3 z njimi vsak unikaten par sosednjih
+ * celic pokrijemo natanko enkrat:
+ *   0: ista celica      (0,  0)
+ *   1: desna celica     (+1, 0)
+ *   2: zgornja celica   (0, +1)
+ *   3: zgoraj desno     (+1,+1)
+ *   4: spodaj desno     (+1,-1)
  *
- * Ena CUDA nit obdela en delec i:
- *   - Pregleda 3x3 = 9 sosednjih celic (z periodičnim ovojem).
- *   - Silo akumulira v lokalnih spremenljivkah fix, fiy.
- *   - Ob koncu zapiše silo samo v fx[i], fy[i] -> ni race conditiona, ni atomics.
- *   - PE upošteva faktor 0.5, ker vsak par (i,j) obiščemo dvakrat.
+ * Teh pet smeri je dovolj, ker bi nasprotne smeri pomenile iste pare še enkrat.
+ * Tukaj Newtonov 3. zakon odstrani podvojeno delo v primerjavi s preverjanjem
+ * obeh smeri i->j in j->i.
  */
-__global__ void compute_forces_cell_kernel(const double *__restrict__ x,
-                                           const double *__restrict__ y,
-                                           double *__restrict__ fx,
-                                           double *__restrict__ fy,
-                                           double *__restrict__ pe_terms,
-                                           const int *__restrict__ cell_counts,
-                                           const int *__restrict__ cell_particles,
-                                           unsigned int n,
-                                           double box_size,
-                                           int nc,
-                                           double cell_size)
+static __device__ __forceinline__ void decode_cell_pair(int cell,
+                                                        int pair_type,
+                                                        int nc,
+                                                        int *cell_b)
 {
-    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= n)
-        return;
+    int cy = cell / nc;
+    int cx = cell - cy * nc;
 
-    const double xi = x[i];
-    const double yi = y[i];
+    int ox = 0;
+    int oy = 0;
+    if (pair_type == 1)
+    {
+        ox = 1;
+        oy = 0;
+    }
+    else if (pair_type == 2)
+    {
+        ox = 0;
+        oy = 1;
+    }
+    else if (pair_type == 3)
+    {
+        ox = 1;
+        oy = 1;
+    }
+    else if (pair_type == 4)
+    {
+        ox = 1;
+        oy = -1;
+    }
+
+    int bx = wrap_cell(cx + ox, nc);
+    int by = wrap_cell(cy + oy, nc);
+    *cell_b = by * nc + bx;
+}
+
+/*
+ * Kernel za izračun sil z uporabo cell-list strukture in Newtonovega 3. zakona.
+ *
+ * Razporeditev mreže:
+ *   blockIdx.x določa en unikaten par celic.
+ *   pair_index = cell * CELL_PAIR_TYPES + pair_type
+ *
+ * Delo znotraj enega bloka:
+ *   - če je pair_type == 0, obdelamo unikatne pare znotraj iste celice: a < b
+ *   - sicer obdelamo vse pare delcev med celico A in celico B
+ *
+ * Posodobitev sil:
+ *   Za par (i, j) silo izračunamo samo enkrat. Nato z atomicAdd dodamo +F delcu i
+ *   in -F delcu j. Atomske operacije so potrebne, ker lahko drug blok hkrati
+ *   posodablja isti delec prek drugega sosednjega para celic.
+ */
+__global__ void compute_forces_newton_cell_kernel(const double *__restrict__ x,
+                                                  const double *__restrict__ y,
+                                                  double *__restrict__ fx,
+                                                  double *__restrict__ fy,
+                                                  double *__restrict__ pe_terms,
+                                                  const int *__restrict__ cell_counts,
+                                                  const int *__restrict__ cell_particles,
+                                                  unsigned int n,
+                                                  double box_size,
+                                                  int nc)
+{
+    unsigned int tid = threadIdx.x;
+    unsigned int pair_index = blockIdx.x;
+    int cell_a = (int)(pair_index / CELL_PAIR_TYPES);
+    int pair_type = (int)(pair_index - (unsigned int)cell_a * CELL_PAIR_TYPES);
+
+    int cell_b = cell_a;
+    decode_cell_pair(cell_a, pair_type, nc, &cell_b);
+
+    int count_a = cell_counts[cell_a];
+    int count_b = cell_counts[cell_b];
+    if (count_a > MAX_PARTICLES_PER_CELL)
+        count_a = MAX_PARTICLES_PER_CELL;
+    if (count_b > MAX_PARTICLES_PER_CELL)
+        count_b = MAX_PARTICLES_PER_CELL;
+
     const double half_box = 0.5 * box_size;
     const double rcut2 = R_CUT * R_CUT;
     const double v_shift = lj_v_shift();
 
-    double fix = 0.0, fiy = 0.0, local_pe = 0.0;
+    double local_pe = 0.0;
 
-    int cx_i = (int)(xi / cell_size);
-    int cy_i = (int)(yi / cell_size);
-    if (cx_i < 0)
-        cx_i = 0;
-    if (cy_i < 0)
-        cy_i = 0;
-    if (cx_i >= nc)
-        cx_i = nc - 1;
-    if (cy_i >= nc)
-        cy_i = nc - 1;
-
-    for (int dcy = -1; dcy <= 1; dcy++)
+    if (pair_type == 0)
     {
-        for (int dcx = -1; dcx <= 1; dcx++)
+        /* Ista celica: obdelamo samo pare a<b, da se izognemo podvajanju dela. */
+        for (int a = 0; a < count_a; ++a)
         {
-            int cx_j = wrap_cell(cx_i + dcx, nc);
-            int cy_j = wrap_cell(cy_i + dcy, nc);
-            int cell_j = cy_j * nc + cx_j;
-
-            int count = cell_counts[cell_j];
-            if (count > MAX_PARTICLES_PER_CELL)
-                count = MAX_PARTICLES_PER_CELL;
-
-            for (int k = 0; k < count; k++)
+            int i = cell_particles[cell_a * MAX_PARTICLES_PER_CELL + a];
+            for (int b = a + 1 + (int)tid; b < count_a; b += blockDim.x)
             {
-                int j = cell_particles[cell_j * MAX_PARTICLES_PER_CELL + k];
-                if ((unsigned int)j == i)
-                    continue;
+                int j = cell_particles[cell_a * MAX_PARTICLES_PER_CELL + b];
 
-                double dx = xi - x[j];
-                double dy = yi - y[j];
+                double dx = x[i] - x[j];
+                double dy = y[i] - y[j];
 
                 if (dx > half_box)
                     dx -= box_size;
@@ -513,32 +636,99 @@ __global__ void compute_forces_cell_kernel(const double *__restrict__ x,
                     double sr6 = sr2 * sr2 * sr2;
                     double sr12 = sr6 * sr6;
                     double f_over_r = 24.0 * EPSILON * (2.0 * sr12 - sr6) * inv_r2;
-                    fix += f_over_r * dx;
-                    fiy += f_over_r * dy;
-                    local_pe += 0.5 * (4.0 * EPSILON * (sr12 - sr6) - v_shift);
+                    double fij_x = f_over_r * dx;
+                    double fij_y = f_over_r * dy;
+
+                    atomicAdd(&fx[i], fij_x);
+                    atomicAdd(&fy[i], fij_y);
+                    atomicAdd(&fx[j], -fij_x);
+                    atomicAdd(&fy[j], -fij_y);
+
+                    local_pe += 4.0 * EPSILON * (sr12 - sr6) - v_shift;
                 }
             }
         }
     }
+    else
+    {
+        /* Dve različni sosednji celici: vsi križni pari so unikatni. */
+        int total_cross_pairs = count_a * count_b;
+        for (int linear = (int)tid; linear < total_cross_pairs; linear += blockDim.x)
+        {
+            int a = linear / count_b;
+            int b = linear - a * count_b;
 
-    fx[i] = fix;
-    fy[i] = fiy;
-    pe_terms[i] = local_pe;
+            int i = cell_particles[cell_a * MAX_PARTICLES_PER_CELL + a];
+            int j = cell_particles[cell_b * MAX_PARTICLES_PER_CELL + b];
+
+            double dx = x[i] - x[j];
+            double dy = y[i] - y[j];
+
+            if (dx > half_box)
+                dx -= box_size;
+            else if (dx < -half_box)
+                dx += box_size;
+            if (dy > half_box)
+                dy -= box_size;
+            else if (dy < -half_box)
+                dy += box_size;
+
+            double r2 = dx * dx + dy * dy;
+            if (r2 < rcut2 && r2 > 0.0)
+            {
+                double inv_r2 = 1.0 / r2;
+                double sr2 = (SIGMA * SIGMA) * inv_r2;
+                double sr6 = sr2 * sr2 * sr2;
+                double sr12 = sr6 * sr6;
+                double f_over_r = 24.0 * EPSILON * (2.0 * sr12 - sr6) * inv_r2;
+                double fij_x = f_over_r * dx;
+                double fij_y = f_over_r * dy;
+
+                atomicAdd(&fx[i], fij_x);
+                atomicAdd(&fy[i], fij_y);
+                atomicAdd(&fx[j], -fij_x);
+                atomicAdd(&fy[j], -fij_y);
+
+                local_pe += 4.0 * EPSILON * (sr12 - sr6) - v_shift;
+            }
+        }
+    }
+
+    /* Znotraj bloka reduciramo potencialno energijo; sile so bile že akumulirane z atomicAdd. */
+    extern __shared__ double s_pe[];
+    s_pe[tid] = local_pe;
+    __syncthreads();
+
+    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
+    {
+        if (tid < stride)
+        {
+            s_pe[tid] += s_pe[tid + stride];
+        }
+        __syncthreads();
+    }
+
+    if (tid == 0)
+    {
+        pe_terms[pair_index] = s_pe[0];
+    }
 }
 
 /*
- * All-pairs fallback za majhno število celic (nc < 3).
- * Ena nit obdela en delec i, zanko po vseh j != i.
+ * Newtonov all-pairs fallback za zelo majhno število celic.
+ * Pri nc < 3 se lahko zaradi periodičnega zavijanja sosednji pari celic podvojijo,
+ * zato cell-list kernel izklopimo in uporabimo to natančno all-pairs različico.
  */
-__global__ void compute_forces_allpairs_kernel(const double *__restrict__ x,
-                                               const double *__restrict__ y,
-                                               double *__restrict__ fx,
-                                               double *__restrict__ fy,
-                                               double *__restrict__ pe_terms,
-                                               unsigned int n,
-                                               double box_size)
+__global__ void compute_forces_newton_allpairs_kernel(const double *__restrict__ x,
+                                                      const double *__restrict__ y,
+                                                      double *__restrict__ fx,
+                                                      double *__restrict__ fy,
+                                                      double *__restrict__ pe_terms,
+                                                      unsigned int n,
+                                                      double box_size)
 {
-    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned int i = blockIdx.x;
+    unsigned int tid = threadIdx.x;
     if (i >= n)
         return;
 
@@ -548,13 +738,10 @@ __global__ void compute_forces_allpairs_kernel(const double *__restrict__ x,
     const double rcut2 = R_CUT * R_CUT;
     const double v_shift = lj_v_shift();
 
-    double fix = 0.0, fiy = 0.0, local_pe = 0.0;
+    double local_pe = 0.0;
 
-    for (unsigned int j = 0; j < n; j++)
+    for (unsigned int j = i + 1 + tid; j < n; j += blockDim.x)
     {
-        if (j == i)
-            continue;
-
         double dx = xi - x[j];
         double dy = yi - y[j];
 
@@ -575,17 +762,38 @@ __global__ void compute_forces_allpairs_kernel(const double *__restrict__ x,
             double sr6 = sr2 * sr2 * sr2;
             double sr12 = sr6 * sr6;
             double f_over_r = 24.0 * EPSILON * (2.0 * sr12 - sr6) * inv_r2;
-            fix += f_over_r * dx;
-            fiy += f_over_r * dy;
-            local_pe += 0.5 * (4.0 * EPSILON * (sr12 - sr6) - v_shift);
+            double fij_x = f_over_r * dx;
+            double fij_y = f_over_r * dy;
+
+            atomicAdd(&fx[i], fij_x);
+            atomicAdd(&fy[i], fij_y);
+            atomicAdd(&fx[j], -fij_x);
+            atomicAdd(&fy[j], -fij_y);
+
+            local_pe += 4.0 * EPSILON * (sr12 - sr6) - v_shift;
         }
     }
 
-    fx[i] = fix;
-    fy[i] = fiy;
-    pe_terms[i] = local_pe;
+    extern __shared__ double s_pe[];
+    s_pe[tid] = local_pe;
+    __syncthreads();
+
+    for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
+    {
+        if (tid < stride)
+        {
+            s_pe[tid] += s_pe[tid + stride];
+        }
+        __syncthreads();
+    }
+
+    if (tid == 0)
+    {
+        pe_terms[i] = s_pe[0];
+    }
 }
 
+/* Prispevek kinetične energije po delcih. Vsoto nato izračuna reduce_sum_kernel. */
 __global__ void kinetic_terms_kernel(const double *__restrict__ vx,
                                      const double *__restrict__ vy,
                                      double *__restrict__ terms,
@@ -597,6 +805,7 @@ __global__ void kinetic_terms_kernel(const double *__restrict__ vx,
     terms[i] = 0.5 * (vx[i] * vx[i] + vy[i] * vy[i]);
 }
 
+/* Splošna redukcija po blokih: vsak blok reducira do 2*blockDim.x vhodnih vrednosti. */
 __global__ void reduce_sum_kernel(const double *__restrict__ in,
                                   double *__restrict__ out,
                                   unsigned int n)
@@ -618,14 +827,19 @@ __global__ void reduce_sum_kernel(const double *__restrict__ in,
     for (unsigned int stride = blockDim.x >> 1; stride > 0; stride >>= 1)
     {
         if (tid < stride)
+        {
             sdata[tid] += sdata[tid + stride];
+        }
         __syncthreads();
     }
 
     if (tid == 0)
+    {
         out[blockIdx.x] = sdata[0];
+    }
 }
 
+/* Reducira tabelo, ki je že na GPE, in končni skalar vrne na CPE. */
 static double reduce_device_sum(const double *d_values,
                                 double *d_tmp1,
                                 double *d_tmp2,
@@ -643,6 +857,7 @@ static double reduce_device_sum(const double *d_values,
         unsigned int blocks = (cur_n + (REDUCE_THREADS * 2 - 1)) / (REDUCE_THREADS * 2);
         reduce_sum_kernel<<<blocks, REDUCE_THREADS, REDUCE_THREADS * sizeof(double)>>>(in, out, cur_n);
         CUDA_CHECK(cudaGetLastError());
+
         cur_n = blocks;
         in = out;
         out = (out == d_tmp1) ? d_tmp2 : d_tmp1;
@@ -688,27 +903,36 @@ static void build_cells_gpu(const double *d_x,
 
 /*
  * Izračuna vse sile na GPE.
- * Pe_terms je vedno velikosti n (ena vrednost na delec).
+ * Funkcija izbere eno izmed dveh implementacij:
+ *   - cell-list + Newtonov 3. zakon, kadar je nc >= 3
+ *   - natančen all-pairs + Newton fallback, kadar je mreža celic premajhna
  */
-static void compute_forces_gpu(const double *d_x,
-                               const double *d_y,
-                               double *d_fx,
-                               double *d_fy,
-                               double *d_pe_terms,
-                               int *d_cell_counts,
-                               int *d_cell_particles,
-                               int *d_overflow,
-                               unsigned int n,
-                               double box_size,
-                               int nc,
-                               double cell_size,
-                               int total_cells,
-                               int use_cells)
+static unsigned int compute_forces_gpu(const double *d_x,
+                                       const double *d_y,
+                                       double *d_fx,
+                                       double *d_fy,
+                                       double *d_pe_terms,
+                                       int *d_cell_counts,
+                                       int *d_cell_particles,
+                                       int *d_overflow,
+                                       unsigned int n,
+                                       double box_size,
+                                       int nc,
+                                       double cell_size,
+                                       int total_cells,
+                                       int use_cells)
 {
-    unsigned int blocks = (n + VECTOR_THREADS - 1) / VECTOR_THREADS;
+    unsigned int vector_blocks = (n + VECTOR_THREADS - 1) / VECTOR_THREADS;
+    clear_forces_kernel<<<vector_blocks, VECTOR_THREADS>>>(d_fx, d_fy, n);
+    CUDA_CHECK(cudaGetLastError());
 
     if (use_cells)
     {
+        unsigned int total_cell_pairs = (unsigned int)total_cells * CELL_PAIR_TYPES;
+        unsigned int term_blocks = (total_cell_pairs + VECTOR_THREADS - 1) / VECTOR_THREADS;
+        clear_double_kernel<<<term_blocks, VECTOR_THREADS>>>(d_pe_terms, total_cell_pairs);
+        CUDA_CHECK(cudaGetLastError());
+
         build_cells_gpu(d_x, d_y, d_cell_counts, d_cell_particles, d_overflow,
                         n, nc, cell_size, total_cells);
 
@@ -722,17 +946,21 @@ static void compute_forces_gpu(const double *d_x,
         }
 #endif
 
-        compute_forces_cell_kernel<<<blocks, VECTOR_THREADS>>>(
-            d_x, d_y, d_fx, d_fy, d_pe_terms,
-            d_cell_counts, d_cell_particles, n, box_size, nc, cell_size);
+        compute_forces_newton_cell_kernel<<<total_cell_pairs, PAIR_THREADS, PAIR_THREADS * sizeof(double)>>>(
+            d_x, d_y, d_fx, d_fy, d_pe_terms, d_cell_counts, d_cell_particles,
+            n, box_size, nc);
         CUDA_CHECK(cudaGetLastError());
+        return total_cell_pairs;
     }
-    else
-    {
-        compute_forces_allpairs_kernel<<<blocks, VECTOR_THREADS>>>(
-            d_x, d_y, d_fx, d_fy, d_pe_terms, n, box_size);
-        CUDA_CHECK(cudaGetLastError());
-    }
+
+    /* Fallback: en blok na delec i, niti znotraj bloka obdelajo j>i. */
+    clear_double_kernel<<<vector_blocks, VECTOR_THREADS>>>(d_pe_terms, n);
+    CUDA_CHECK(cudaGetLastError());
+
+    compute_forces_newton_allpairs_kernel<<<n, PAIR_THREADS, PAIR_THREADS * sizeof(double)>>>(
+        d_x, d_y, d_fx, d_fy, d_pe_terms, n, box_size);
+    CUDA_CHECK(cudaGetLastError());
+    return n;
 }
 
 // -----------------------------------------------------------------------------
@@ -751,21 +979,33 @@ SimulationResult run_simulation(Particle *particles,
     out.particles = particles;
 
     if (n == 0)
+    {
         return out;
+    }
 
     const size_t particle_bytes = (size_t)n * sizeof(Particle);
     const size_t double_bytes = (size_t)n * sizeof(double);
     const unsigned int vector_blocks = (n + VECTOR_THREADS - 1) / VECTOR_THREADS;
 
+    /*
+     * Velikost celice mora biti >= R_CUT, da so vsi možni interakcijski partnerji
+     * v isti ali sosednjih celicah. Izberemo nc = floor(box/R_CUT), zato
+     * cell_size = box/nc nikoli ni manjši od R_CUT.
+     */
     int nc = (int)(box_size / R_CUT);
     if (nc < 1)
         nc = 1;
     double cell_size = box_size / (double)nc;
     int total_cells = nc * nc;
-    int use_cells = (nc >= 3);
 
-    /* Pe_terms in ke_terms sta vedno velikosti n. */
-    const unsigned int reduce_capacity = (n + (REDUCE_THREADS * 2 - 1)) / (REDUCE_THREADS * 2);
+    /* Pri nc < 3 se periodični pari sosednjih celic lahko podvojijo, zato uporabimo natančen fallback. */
+    int use_cells = (nc >= 3);
+    unsigned int total_cell_pairs = use_cells ? (unsigned int)total_cells * CELL_PAIR_TYPES : n;
+
+    /* d_pe_terms hrani člene potencialne energije, d_ke_terms pa člene kinetične energije. */
+    unsigned int max_reduce_items = (total_cell_pairs > n) ? total_cell_pairs : n;
+    const size_t pe_bytes = (size_t)max_reduce_items * sizeof(double);
+    const unsigned int reduce_capacity = (max_reduce_items + (REDUCE_THREADS * 2 - 1)) / (REDUCE_THREADS * 2);
     const size_t reduce_bytes = (size_t)((reduce_capacity > 1) ? reduce_capacity : 1) * sizeof(double);
 
     Particle *d_particles = NULL;
@@ -773,6 +1013,7 @@ SimulationResult run_simulation(Particle *particles,
     double *d_pe_terms = NULL, *d_ke_terms = NULL, *d_tmp1 = NULL, *d_tmp2 = NULL;
     int *d_cell_counts = NULL, *d_cell_particles = NULL, *d_overflow = NULL;
 
+    /* Vse trajne GPE tabele alociramo enkrat. Med celotno simulacijo ostanejo na GPE. */
     CUDA_CHECK(cudaMalloc((void **)&d_particles, particle_bytes));
     CUDA_CHECK(cudaMalloc((void **)&d_x, double_bytes));
     CUDA_CHECK(cudaMalloc((void **)&d_y, double_bytes));
@@ -780,7 +1021,7 @@ SimulationResult run_simulation(Particle *particles,
     CUDA_CHECK(cudaMalloc((void **)&d_vy, double_bytes));
     CUDA_CHECK(cudaMalloc((void **)&d_fx, double_bytes));
     CUDA_CHECK(cudaMalloc((void **)&d_fy, double_bytes));
-    CUDA_CHECK(cudaMalloc((void **)&d_pe_terms, double_bytes));
+    CUDA_CHECK(cudaMalloc((void **)&d_pe_terms, pe_bytes));
     CUDA_CHECK(cudaMalloc((void **)&d_ke_terms, double_bytes));
     CUDA_CHECK(cudaMalloc((void **)&d_tmp1, reduce_bytes));
     CUDA_CHECK(cudaMalloc((void **)&d_tmp2, reduce_bytes));
@@ -793,14 +1034,21 @@ SimulationResult run_simulation(Particle *particles,
         CUDA_CHECK(cudaMalloc((void **)&d_overflow, sizeof(int)));
     }
 
+    /*
+     * Začetni prenos CPE -> GPE. Ker main.c meri čas okoli run_simulation(),
+     * je tudi ta prenos vključen v čas meritev.
+     */
     CUDA_CHECK(cudaMemcpy(d_particles, particles, particle_bytes, cudaMemcpyHostToDevice));
+
+    /* Pretvorimo Particle strukture v SoA tabele, ki jih uporabljajo CUDA kerneli. */
     pack_particles_kernel<<<vector_blocks, VECTOR_THREADS>>>(d_particles, d_x, d_y, d_vx, d_vy, d_fx, d_fy, n);
     CUDA_CHECK(cudaGetLastError());
 
-    compute_forces_gpu(d_x, d_y, d_fx, d_fy, d_pe_terms,
-                       d_cell_counts, d_cell_particles, d_overflow,
-                       n, box_size, nc, cell_size, total_cells, use_cells);
-    out.start_potential = reduce_device_sum(d_pe_terms, d_tmp1, d_tmp2, n);
+    /* Izračunamo začetne sile in začetno potencialno energijo. Sile potrebujemo za prvi Leapfrog korak. */
+    unsigned int pe_count = compute_forces_gpu(d_x, d_y, d_fx, d_fy, d_pe_terms,
+                                               d_cell_counts, d_cell_particles, d_overflow,
+                                               n, box_size, nc, cell_size, total_cells, use_cells);
+    out.start_potential = reduce_device_sum(d_pe_terms, d_tmp1, d_tmp2, pe_count);
     out.start_kinetic = compute_ke_gpu(d_vx, d_vy, d_ke_terms, d_tmp1, d_tmp2, n);
     out.start_total = out.start_kinetic + out.start_potential;
 
@@ -811,7 +1059,9 @@ SimulationResult run_simulation(Particle *particles,
 #if GENERATE_GIF
     ge_GIF *gif = ge_new_gif(GIF_FILE, (uint16_t)FRAME_WIDTH, (uint16_t)FRAME_HEIGHT, palette, 8, -1, 0);
     if (!gif)
+    {
         fprintf(stderr, "Warning: failed to create GIF output %s\n", GIF_FILE);
+    }
     else
     {
         render_frame_gif(gif, particles, n, box_size);
@@ -821,20 +1071,24 @@ SimulationResult run_simulation(Particle *particles,
 
     for (unsigned int step = 0; step < nsteps; ++step)
     {
+        /* 1) Prva polovica Leapfrog koraka: posodobimo hitrosti in pozicije. */
         integrate_first_kernel<<<vector_blocks, VECTOR_THREADS>>>(d_x, d_y, d_vx, d_vy,
                                                                   d_fx, d_fy, n, box_size);
         CUDA_CHECK(cudaGetLastError());
 
-        compute_forces_gpu(d_x, d_y, d_fx, d_fy, d_pe_terms,
-                           d_cell_counts, d_cell_particles, d_overflow,
-                           n, box_size, nc, cell_size, total_cells, use_cells);
+        /* 2) Ponovno zgradimo cell-list in izračunamo nove sile pri posodobljenih pozicijah. */
+        pe_count = compute_forces_gpu(d_x, d_y, d_fx, d_fy, d_pe_terms,
+                                      d_cell_counts, d_cell_particles, d_overflow,
+                                      n, box_size, nc, cell_size, total_cells, use_cells);
 
+        /* 3) Druga polovica Leapfrog koraka: dokončamo posodobitev hitrosti z novimi silami. */
         integrate_second_kernel<<<vector_blocks, VECTOR_THREADS>>>(d_vx, d_vy, d_fx, d_fy, n);
         CUDA_CHECK(cudaGetLastError());
 
+        /* Opcijsko beleženje energije. Pri benchmark meritvah naj bo log_steps=0. */
         if (log_steps)
         {
-            out.final_potential = reduce_device_sum(d_pe_terms, d_tmp1, d_tmp2, n);
+            out.final_potential = reduce_device_sum(d_pe_terms, d_tmp1, d_tmp2, pe_count);
             out.final_kinetic = compute_ke_gpu(d_vx, d_vy, d_ke_terms, d_tmp1, d_tmp2, n);
             out.final_total = out.final_kinetic + out.final_potential;
             printf("step=%6u KE=%12.6f PE=%12.6f E=%12.6f\n",
@@ -853,13 +1107,18 @@ SimulationResult run_simulation(Particle *particles,
 #endif
     }
 
+    /* Če energije nismo beležili v vsakem koraku, jo na koncu izračunamo samo enkrat. */
     if (!log_steps && nsteps > 0)
     {
-        out.final_potential = reduce_device_sum(d_pe_terms, d_tmp1, d_tmp2, n);
+        out.final_potential = reduce_device_sum(d_pe_terms, d_tmp1, d_tmp2, pe_count);
         out.final_kinetic = compute_ke_gpu(d_vx, d_vy, d_ke_terms, d_tmp1, d_tmp2, n);
         out.final_total = out.final_kinetic + out.final_potential;
     }
 
+    /*
+     * Končni prenos delcev GPE -> CPE. Tudi ta prenos je znotraj run_simulation(),
+     * zato je vključen v izmerjeni čas GPE izvajanja.
+     */
     unpack_particles_kernel<<<vector_blocks, VECTOR_THREADS>>>(d_particles, d_x, d_y, d_vx, d_vy, d_fx, d_fy, n);
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK(cudaMemcpy(particles, d_particles, particle_bytes, cudaMemcpyDeviceToHost));
@@ -867,7 +1126,9 @@ SimulationResult run_simulation(Particle *particles,
 
 #if GENERATE_GIF
     if (gif)
+    {
         ge_close_gif(gif);
+    }
 #endif
 
     CUDA_CHECK(cudaFree(d_particles));
