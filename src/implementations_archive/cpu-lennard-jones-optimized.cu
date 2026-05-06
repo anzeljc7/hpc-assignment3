@@ -4,15 +4,9 @@
 #include <string.h>
 #include <omp.h>
 
-// #include <cuda_runtime.h>
-// #include <cuda.h>
-
 #include "gifenc.h"
 #include "lennard-jones.h"
 
-// ---------------------------------------------------------------------------
-// GIF rendering (unchanged from reference)
-// ---------------------------------------------------------------------------
 #if GENERATE_GIF
 uint8_t palette[] = {0, 0, 0, 255, 255, 0};
 
@@ -40,19 +34,14 @@ void render_frame_gif(ge_GIF *gif, const Particle *particles,
 }
 #endif
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 double random_double(void)
 {
     return (double)rand() / (double)RAND_MAX;
 }
 
-// Kinetična energija: Ek = sum_i 0.5 * |v_i|^2
-// Obremenitev je enakomerna (vsak delec enako dela), zato static urnik.
-// reduction(+:ke) zagotavlja, da vsaka nit sešteva v svojo lokalno kopijo,
-// ki se ob koncu seštejejo skupaj brez race conditiona.
+// Kinetična energija
+// reduction(+:ke) zagotavlja, da vsaka nit sešteva v svojo spremenljivko ke,
+// na koncu se sešteje brez race conditiona
 double compute_ke(const Particle *particles, unsigned int n)
 {
     double ke = 0.0;
@@ -63,9 +52,7 @@ double compute_ke(const Particle *particles, unsigned int n)
     return ke;
 }
 
-// ---------------------------------------------------------------------------
-// Particle initialisation (unchanged logic)
-// ---------------------------------------------------------------------------
+// Particle initialisation
 
 int initialize_particles(Particle *particles, unsigned int n, double box_size,
                          double placement_fraction, unsigned int seed,
@@ -74,6 +61,8 @@ int initialize_particles(Particle *particles, unsigned int n, double box_size,
     srand(seed);
 
     unsigned int n_side = (unsigned int)ceil(sqrt((double)n));
+    // placement_fraction < 1: delci se postavijo v srednji del škatle,
+    // da se izognemo takojšnjim trkom z robom pri visokih temperaturah.
     double placement_size = placement_fraction * box_size;
     double offset = 0.5 * (box_size - placement_size);
     double delta = placement_size / (double)n_side;
@@ -118,21 +107,19 @@ int initialize_particles(Particle *particles, unsigned int n, double box_size,
     return 1;
 }
 
-// ---------------------------------------------------------------------------
 // Periodic boundary conditions
-// ---------------------------------------------------------------------------
-
-// Periodični robni pogoji: delci, ki zapustijo škatlo, se pojavijo na
-// nasprotni strani. fmod vrne vrednost v [-box_size, box_size], zato
-// negativne vrednosti popravimo z dodatkom box_size.
-// Vsak delec je neodvisen → static urnik (enaka obremenitev, brez overhead-a).
+// Periodični robni pogoji: delci, ki zapustijo škatlo, se pojavijo na nasprotni strani.
 void wrap_positions(Particle *particles, unsigned int n, double box_size)
 {
+// Spet neodvisni delci
 #pragma omp parallel for schedule(static)
     for (unsigned int i = 0; i < n; ++i)
     {
+        // ostanek pri deljenju poskrbi, da je znotraj škatle
         double wx = fmod(particles[i].x, box_size);
         double wy = fmod(particles[i].y, box_size);
+        // fmod vrne vrednost v [-box_size, box_size]
+        // negativne se prestavijo v pozitivne
         if (wx < 0.0)
             wx += box_size;
         if (wy < 0.0)
@@ -142,15 +129,7 @@ void wrap_positions(Particle *particles, unsigned int n, double box_size)
     }
 }
 
-// ---------------------------------------------------------------------------
-// Shifted LJ potential: V_shifted(r) = V(r) - V(r_cut)
-// ---------------------------------------------------------------------------
-
-// LJ potencial pri r = R_CUT ni točno 0 (ampak ~0.016*epsilon), kar bi
-// povzročilo skok pri prehodu čez mejo cutoff-a. To krši ohranjanje energije.
-// Shift odšteje V(R_CUT) od vsakega para, tako da potencial gladko pade na 0.
-// Izračunamo enkrat pred zanko, da ne ponavljamo dragih množenj.
-// sr6 = (sigma/R_CUT)^6 z množenji namesto pow() – hitrejše.
+// Shifted LJ potential
 double compute_v_shift(void)
 {
     double sr_cut = SIGMA / R_CUT;
@@ -158,24 +137,16 @@ double compute_v_shift(void)
     return 4.0 * EPSILON * (sr6 * sr6 - sr6);
 }
 
-// ---------------------------------------------------------------------------
 // Cell list
-//
-// Referenčna koda ima O(N²) zanko – vsak delec primerja z vsakim.
-// Cell list razdeli škatlo na mrežo celic s stranico >= R_CUT.
 // Ker delci zunaj R_CUT ne vplivajo drug na drugega, vsak delec i
 // pregleda samo 3×3 = 9 sosednjih celic namesto vseh N delcev.
-// Skupna kompleksnost pade z O(N²) na O(N) – potrjeno z meritvami:
-//   N=1000 → 0.528 s,  N=2000 → 0.737 s,  N=4000 → 1.116 s,  N=8000 → 1.634 s
-// (podvojitev N ≈ 1.5× časa namesto 4× pri O(N²))
 // Cell list se obnovi vsak korak, ker se delci premikajo.
-// ---------------------------------------------------------------------------
 
 typedef struct
 {
-    int *head; // head[c] = indeks prvega delca v celici c, -1 če prazna
-    int *next; // next[i] = naslednji delec v isti celici, -1 če zadnji
-    int nc;    // število celic na stran
+    int *head; // indeks prvega delca v celici c, -1 če prazna
+    int *next; // naslednji delec v isti celici, -1 če zadnji
+    int nc;    // število celic na
     double cell_size;
     int n_cells;
 } CellList;
@@ -183,14 +154,20 @@ typedef struct
 static CellList celllist_create(unsigned int n, double box_size)
 {
     CellList cl;
-    // nc = floor(box_size / R_CUT) → cell_size >= R_CUT vedno drži.
-    // To je ključno: celica mora biti vsaj R_CUT velika, sicer bi partner
-    // lahko ležal 2+ celic stran in bi ga 3×3 pregled zgrešil.
+
+    // 1. Število celic na stran
+    // Zaokroži na dol št. celic
     cl.nc = (int)(box_size / R_CUT);
+
+    // 2. Če bi bila škatla manjša od R_CUT, uporabimo eno samo celico.
     if (cl.nc < 1)
         cl.nc = 1;
+
+    // 3. Dejanska velikost celice — ker se zaokroži navzdol jšt celic je lahko velikost malo večja
     cl.cell_size = box_size / (double)cl.nc;
     cl.n_cells = cl.nc * cl.nc;
+
+    // 4. Alokacija za delce
     cl.head = (int *)malloc((size_t)cl.n_cells * sizeof(int));
     cl.next = (int *)malloc((size_t)n * sizeof(int));
     return cl;
@@ -202,69 +179,72 @@ static void celllist_free(CellList *cl)
     free(cl->next);
 }
 
-// Gradi povezan seznam delcev po celicah z vstavljanjem na začetek (O(N)).
-// head[c] kaže na zadnji vstavljeni delec v celici c; next[i] kaže na
-// prejšnjega. Rezultat je enosmerni seznam za vsako celico brez dodatnega
-// pomnilnika za fiksno dolge sezname.
+// Gradi povezan seznam delcev po celicah z vstavljanjem na začetek
+// head[c] kaže na prvi delec v celici c; next[i] kaže na delec ki je naprej od delca i.
+// Vstavljamo na začetek -> enosmerni povezan seznam za vsako celico.
 static void celllist_build(CellList *cl, const Particle *particles,
                            unsigned int n)
 {
+    // 1. Inicializacija: vse celice prazne (-1 = konec seznama).
     for (int c = 0; c < cl->n_cells; c++)
         cl->head[c] = -1;
+
+    // Za vsak delec
     for (unsigned int i = 0; i < n; i++)
     {
+        // 2. Določi celico delca i iz njegovih koordinat.
         int cx = (int)(particles[i].x / cl->cell_size);
         int cy = (int)(particles[i].y / cl->cell_size);
-        // Zaščita pred floating-point robnim primerom, ko je x/y == box_size
+
+        // 3. Zaščita pred robnim primerom, ko je x ali y == box_size.
         if (cx >= cl->nc)
             cx = cl->nc - 1;
         if (cy >= cl->nc)
             cy = cl->nc - 1;
+
         int c = cy * cl->nc + cx;
-        cl->next[i] = cl->head[c];
-        cl->head[c] = (int)i;
+
+        // 4. Vstavi delec i na začetek seznama celice c
+        cl->next[i] = cl->head[c]; // kateri je naprej od tega delca
+        cl->head[c] = (int)i;      // kateri delec je v tej celici c
+
+        // head[0] = 3
+        // next[3] = 0
+        // next[0] = -1
+        // Seznam celice 0: 3 -> 0 -> -1
     }
 }
 
-// ---------------------------------------------------------------------------
 // Force computation
-//
-// Osnovna ideja – "ena nit, en delec":
-//
-//   Vsaka vzporedna iteracija i obdela točno en delec i.
-//   Prebere sosede iz cell lista, silo akumulira v LOKALNI spremenljivki
-//   fix/fiy in jo ob koncu zapiše samo v particles[i].
-//
-//   Ker nobena nit ne piše v delec druge niti, ni race conditionov in
-//   ni potrebe po atomics ali sinhronizaciji.
-//   Isti vzorec se direktno prenese na GPU (ena CUDA nit = en delec).
-//
-//   Kompromis: par (i,j) obiščemo dvakrat (enkrat za i, enkrat za j),
-//   zato pri PE upoštevamo faktor 0.5. Newton 3. zakon bi prepolovil
-//   delo, a bi zahteval atomics ali race-condition-free akumulacijo,
-//   kar bi zakompliciralo vzporeditev (posebej na GPU).
-// ---------------------------------------------------------------------------
+// ena nit, en delec
+// Vsaka vzporedna iteracija i obdela točno en delec i.
+// Prebere sosede iz cell lista, silo akumulira v LOKALNI spremenljivki
+// fix/fiy in jo ob koncu zapiše samo v particles[i].
+// Ker nobena nit ne piše v delec druge niti, ni race conditionov in
+// ni potrebe po atomics ali sinhronizaciji.
+// Isti vzorec se direktno prenese na GPU (ena CUDA nit = en delec).
 
 double compute_forces(Particle *particles, unsigned int n, double box_size)
 {
+    // 1. Konstante, ki so enake za vse pare
     const double v_shift = compute_v_shift();
-    // Primerjamo r² z rc² namesto r z R_CUT – prihranimo sqrt() za vsak par.
-    const double rc2 = R_CUT * R_CUT;
-    const double half_box = 0.5 * box_size;
+    const double rc2 = R_CUT * R_CUT;       // kvadrat cutoff, da se izognemo sqrt()
+    const double half_box = 0.5 * box_size; // za minimum-image konvencijo
 
+    // 2. Zgradi cell list
     CellList cl = celllist_create(n, box_size);
     celllist_build(&cl, particles, n);
 
     double pe = 0.0;
 
-    // static urnik: meritve so pokazale, da pri naših velikostih sistema je to bolje
+    // 3. Vzporedna zanka: vsaka nit obdela en delec i neodvisno od ostalih.
 #pragma omp parallel for reduction(+ : pe) schedule(static)
     for (unsigned int i = 0; i < n; ++i)
     {
-        // Lokalna akumulatorja sile: vsaka nit piše le sem, brez deljenja
-        // pomnilnika z drugimi nitmi → brez false sharinga, brez race conditiona.
+        // Lokalni akumulator sile — vsaka nit piše samo sem, brez race conditiona.
         double fix = 0.0, fiy = 0.0;
 
+        // 4. Določi celico delca i.
         int cx_i = (int)(particles[i].x / cl.cell_size);
         int cy_i = (int)(particles[i].y / cl.cell_size);
         if (cx_i >= cl.nc)
@@ -272,9 +252,7 @@ double compute_forces(Particle *particles, unsigned int n, double box_size)
         if (cy_i >= cl.nc)
             cy_i = cl.nc - 1;
 
-        // Pregledamo 3×3 celice v okolici (s periodičnim ovojem prek modulo).
-        // Ker je cell_size >= R_CUT, so garantirani vsi možni partnerji znotraj
-        // R_CUT v teh 9 celicah – nobeden ne leži dlje.
+        // 5. Preglej 3×3 sosednje celice
         for (int dcy = -1; dcy <= 1; dcy++)
         {
             for (int dcx = -1; dcx <= 1; dcx++)
@@ -285,14 +263,14 @@ double compute_forces(Particle *particles, unsigned int n, double box_size)
                 int cy_j = ((cy_i + dcy) % cl.nc + cl.nc) % cl.nc;
                 int cell_j = cy_j * cl.nc + cx_j;
 
+                // 6. Preglej vse delce v celici prek povezanega seznama.
                 for (int j = cl.head[cell_j]; j != -1; j = cl.next[j])
                 {
                     if ((unsigned int)j == i)
                         continue; // preskoči self-interakcijo
 
-                    // Minimum-image konvencija: izberemo najbližjo periodično
-                    // sliko delca j glede na i. if/else je hitrejši kot
-                    // nearbyint(), ki ga uporablja referenčna koda.
+                    // 7. Minimum-image konvencija: vzamemo najbližjo periodično kopijo j.
+                    //    if/else je hitrejši kot nearbyint().
                     double dx = particles[i].x - particles[j].x;
                     double dy = particles[i].y - particles[j].y;
                     if (dx > half_box)
@@ -304,32 +282,27 @@ double compute_forces(Particle *particles, unsigned int n, double box_size)
                     else if (dy < -half_box)
                         dy += box_size;
 
+                    // 8. Preskoči pare zunaj cutoffa — brez sqrt().
                     double r2 = dx * dx + dy * dy;
-                    // Preskoči pare zunaj cutoff-a brez sqrt – preverimo r² ≥ rc².
                     if (r2 >= rc2 || r2 == 0.0)
                         continue;
 
-                    // (σ/r)^6 in (σ/r)^12 z množenji namesto pow().
-                    // pow() kliče exp/log internalno in je ~10× počasnejši
-                    // od navadnih množenj za cele potence.
+                    // 9. Izračunaj LJ potence z množenjem namesto pow().
                     double sr2 = (SIGMA * SIGMA) / r2;
                     double sr6 = sr2 * sr2 * sr2;
                     double sr12 = sr6 * sr6;
 
-                    // fij / r² = F(r) / r: sila v smeri dx, dy brez sqrt.
-                    // Referenčna koda: fij/r * (dx/r) = fij*dx/r² – enako,
-                    // a tam je bil r = sqrt(r²) izračunan eksplicitno.
+                    // 10. Akumuliraj silo in PE za ta par.
+                    //     0.5 pri PE: vsak par (i,j) obiščemo dvakrat (i→j in j→i).
                     double fij_r2 = 24.0 * EPSILON * (2.0 * sr12 - sr6) / r2;
                     fix += fij_r2 * dx;
                     fiy += fij_r2 * dy;
-
-                    // 0.5: ker vsak par (i,j) obiščemo dvakrat (i→j in j→i).
                     pe += 0.5 * (4.0 * EPSILON * (sr12 - sr6) - v_shift);
                 }
             }
         }
 
-        // En sam vpis na delec i ob koncu – nobena druga nit ne piše sem.
+        // 11. Zapiši silo delca i — en sam vpis, nobena druga nit ne piše sem.
         particles[i].fx = fix;
         particles[i].fy = fiy;
     }
@@ -339,18 +312,12 @@ double compute_forces(Particle *particles, unsigned int n, double box_size)
 }
 
 // Leapfrog je časovno reverzibilna shema (simplectic integrator), ki dobro
-// ohranja energijo dolgoročno. En korak sestoji iz:
-//   1. half-kick: v(t + dt/2) = v(t) + 0.5*a(t)*dt
-//   2. drift:     r(t + dt)   = r(t) + v(t + dt/2)*dt
-//   3. sile:      a(t + dt)   iz novih pozicij
-//   4. half-kick: v(t + dt)   = v(t + dt/2) + 0.5*a(t+dt)*dt
-//
-// Koraka 1+2 sta združena v eno zanko (v referenčni kodi sta ločeni).
-
+// ohranja energijo dolgoročno.
 double leapfrog_step(Particle *particles, unsigned int n, double box_size)
 {
-    // Koraka 1+2 združena: half-kick hitrosti + polni premik pozicije.
-    // Obremenitev je enakomerna → static urnik.
+    // Half-kick hitrosti + polni premik pozicije
+    // to je združeno v eno zanko
+    // Vsak delec neodvisen
 #pragma omp parallel for schedule(static)
     for (unsigned int i = 0; i < n; ++i)
     {
@@ -363,10 +330,10 @@ double leapfrog_step(Particle *particles, unsigned int n, double box_size)
 
     wrap_positions(particles, n, box_size);
 
-    // Preračun sil iz novih pozicij – najdražji del koraka.
+    // Preračun sil iz novih pozicij — najdražji del
     double pe = compute_forces(particles, n, box_size);
 
-    // Korak 4: drugi half-kick z novimi silami.
+    // Drugi half-kick z novimi silami
 #pragma omp parallel for schedule(static)
     for (unsigned int i = 0; i < n; ++i)
     {
@@ -375,12 +342,11 @@ double leapfrog_step(Particle *particles, unsigned int n, double box_size)
         p->vy += 0.5 * DT * p->fy;
     }
 
+    // vrne poračunano potencialno energijo sistema
     return pe;
 }
 
-// ---------------------------------------------------------------------------
 // Top-level simulation runner
-// ---------------------------------------------------------------------------
 
 SimulationResult run_simulation(Particle *particles, unsigned int n,
                                 unsigned int nsteps, double box_size,
@@ -388,6 +354,7 @@ SimulationResult run_simulation(Particle *particles, unsigned int n,
 {
     SimulationResult out;
 
+    // Začetne sile
     out.start_potential = compute_forces(particles, n, box_size);
     out.start_kinetic = compute_ke(particles, n);
     out.start_total = out.start_kinetic + out.start_potential;
@@ -405,10 +372,14 @@ SimulationResult run_simulation(Particle *particles, unsigned int n,
     }
 #endif
 
+    // Za vsak korak
     for (unsigned int step = 0; step < nsteps; step++)
     {
+        // Premakne delce za en časovni korak dt in vrne PE iz novih pozicij.
         out.final_potential = leapfrog_step(particles, n, box_size);
+        // KE izračunamo iz novih hitrosti
         out.final_kinetic = compute_ke(particles, n);
+        // Skupaj s PE dobimo skupno energijo.
         out.final_total = out.final_kinetic + out.final_potential;
 
         if (log_steps)
